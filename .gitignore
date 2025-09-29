@@ -1,0 +1,13 @@
+# ignore all model files
+models/*
+!models/.gitkeep
+
+# ignore virtualenv
+venv/
+.env/
+env/
+# ignore pycache
+__pycache__/
+*.py[cod]
+.pyo
+.pyd

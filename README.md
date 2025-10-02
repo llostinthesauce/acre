@@ -9,8 +9,10 @@ all models must be downloaded manually (gguf/bin format) and dropped into the `/
 
 # containerize
 
-# encrypt
+# encrypt, password protect
 
-# where to store user data?
+# where to store user data? database local
 
 # ignore models in git push for obvious reasons
+
+# 

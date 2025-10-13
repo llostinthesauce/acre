@@ -1,2 +1,6 @@
 ctransformers
 tk
+cryptography
+# Optional (install manually if using safetensors / transformers backend)
+# torch
+# transformers

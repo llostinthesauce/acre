@@ -1,6 +1,13 @@
 # ignore all model files
 models/*
 !models/.gitkeep
+!models/registry.json
+
+config/*
+!config/.gitkeep
+
+history/*
+!history/.gitkeep
 
 # ignore virtualenv
 venv/

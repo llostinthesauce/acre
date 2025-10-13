@@ -1,0 +1,22 @@
+{
+  "models": [
+    {
+      "name": "llama-2-7b-chat.Q3_K_S",
+      "path": "llama-2-7b-chat.Q3_K_S.gguf",
+      "backend": "ctransformers",
+      "model_type": "llama"
+    },
+    {
+      "name": "llama-2-7b-chat.Q3_K_S_1",
+      "path": "llama-2-7b-chat.Q3_K_S_1.gguf",
+      "backend": "ctransformers",
+      "model_type": "llama"
+    },
+    {
+      "name": "dupe",
+      "path": "llama-2-7b-chat.Q3_K_S_1.gguf",
+      "backend": "ctransformers",
+      "model_type": "llama-2-7b-chat.Q3_K_S_1"
+    }
+  ]
+}

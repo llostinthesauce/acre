@@ -6,17 +6,6 @@ from model_manager import model_manager
 
 mgr = model_manager()
 
-def render_history():
-    chat_history.configure(state='normal')
-    chat_history.delete("1.0", tk.END)
-    for message in mgr.get_history():
-        role = message.get("role")
-        content = message.get("content", "")
-        prefix = "User" if role == "user" else "Assistant"
-        chat_history.insert(tk.END, f"{prefix}: {content}\n\n")
-    chat_history.see(tk.END)
-    chat_history.configure(state='disabled')
-
 def refresh_list():
     models = mgr.list_models()
     listbox.delete(0, tk.END)
@@ -28,9 +17,7 @@ def pick_model():
     if choice:
         loaded = mgr.load_model(choice)
         if loaded:
-            render_history()
-            backend = mgr.backend or "unknown backend"
-            status.config(text=f"Model loaded: {choice} ({backend})", wraplength=230, justify="left")
+            status.config(text=f"Model loaded: {choice}", wraplength=230, justify="left")
         else:
             status.config(text=f"Failed to load: {choice}", wraplength=230, justify="left")
 
@@ -47,9 +34,6 @@ def run_prompt():
     text = entry.get("1.0", tk.END).strip()
     if not text:
         return
-    if not mgr.is_loaded():
-        status.config(text="Load a model before sending a prompt.", wraplength=230, justify="left")
-        return
     entry.delete("1.0", tk.END)
     chat_history.configure(state='normal')
     chat_history.insert(tk.END, f"User: {text}\n")
@@ -63,11 +47,11 @@ def run_prompt():
         except Exception as e:
             output_text = f"Error: {e}"
 
-        if output_text.startswith("❌") or output_text.startswith("Error"):
-            status.config(text=output_text, wraplength=230, justify="left")
-        else:
-            status.config(text="Done")
-        render_history()
+        chat_history.configure(state='normal')
+        chat_history.insert(tk.END, f"Assistant: {output_text}\n\n")
+        chat_history.see(tk.END)
+        chat_history.configure(state='disabled')
+        status.config(text="Done")
 
     threading.Thread(target=task, daemon=True).start()
 

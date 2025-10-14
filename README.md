@@ -16,3 +16,11 @@ all models must be downloaded manually (gguf/bin format) and dropped into the `/
 # ignore models in git push for obvious reasons
 
 # 
+
+## to-do
+- password protection
+- pretty up the UI
+- encrypt data locally
+- package dependencies into app file
+- containerize
+- load chat history / clear chat history

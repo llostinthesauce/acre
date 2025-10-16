@@ -1,2 +1,2 @@
-ctransformers
+llama-cpp-python
 tk

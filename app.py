@@ -89,14 +89,6 @@ ctk.CTkLabel(side_frame, text="Models:", text_color=TEXT, font=FONT_H1).pack(pad
 listbox_frame = ctk.CTkFrame(side_frame, fg_color=BG_PANEL, corner_radius=0)
 listbox_frame.pack(fill="both", expand=True)
 
-list_scroll = ctk.CTkScrollbar(
-    listbox_frame, 
-    orientation="vertical", 
-    fg_color=BG_PANEL,
-    button_color=ACCENT,
-    button_hover_color="#8db9ff",
-    width=10
-)
 
 listbox = tk.Listbox(
     listbox_frame, 
@@ -107,10 +99,8 @@ listbox = tk.Listbox(
     relief=tk.FLAT,
     highlightthickness=0,
     font=FONT_UI,
-    yscrollcommand=list_scroll.set
 )
 listbox.pack(side="left", fill="both", expand=True, padx=(0,4))
-list_scroll.configure(command=listbox.yview)
 
 btn_pad = dict(fill="x", pady=6)
 ctk.CTkButton(
@@ -163,16 +153,6 @@ chat_frame.pack(side="right", fill="both", expand=True, padx=10, pady=10)
 chat_border = ctk.CTkFrame(chat_frame, fg_color=BORDER_ACCENT, corner_radius=12)
 chat_border.pack(fill="both", expand=True, padx=10, pady=(10, 6))
 
-chat_scroll = ctk.CTkScrollbar(
-    chat_border,
-    orientation="vertical",
-    fg_color=BG_LIST,
-    button_color=ACCENT,
-    button_hover_color="#8db9ff",
-    width=10
-)
-chat_scroll.pack(side="right", fill="y", padx=(0, 4), pady=4)
-
 chat_history = ctk.CTkTextbox(
     chat_border, 
     height=420,
@@ -181,25 +161,24 @@ chat_history = ctk.CTkTextbox(
     text_color=TEXT,
     font=FONT_UI,
     wrap="word",
-    yscrollcommand=chat_scroll.set
 )
-chat_history.pack(fill="both", expand=True, padx=(4, 0), pady=4)
+chat_history.pack(fill="both", expand=True, padx=4, pady=4)
 chat_history.configure(state='disabled')
-chat_scroll.configure(command=chat_history.yview)
 
 entry_border = ctk.CTkFrame(chat_frame, fg_color=BORDER_ACCENT, corner_radius=12)
 entry_border.pack(fill="x", padx=10, pady=(0, 6))
 
+
 entry = ctk.CTkTextbox(
     entry_border,
     height=80,
-    corner_radius=12,
+    corner_radius=10,
     fg_color=BG_LIST,
     text_color=TEXT,
     font=FONT_UI,
     wrap="word",
 )
-entry.pack(fill="x", padx=2, pady=2)
+entry.pack(fill="x", padx=4, pady=4)
 
 ctk.CTkButton(
     chat_frame, 

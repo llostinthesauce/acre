@@ -1,9 +1,11 @@
 import tkinter as tk
-from tkinter import filedialog, messagebox
+from tkinter import filedialog
+from tkinter import *
 import shutil
 import threading
 from model_manager import model_manager
 import customtkinter as ctk
+from PIL import Image, ImageTk
 
 mgr = model_manager()
 
@@ -19,6 +21,7 @@ BORDER_ACCENT = "#91bbff"
 FONT_UI = ("Segoe UI", 11)
 FONT_BOLD = ("Segoe UI", 11, "bold")
 FONT_H1 = ("Segoe UI", 16, "bold")
+PLACEHOLDER = "Ask me anything..."
 
 def refresh_list():
     models = mgr.list_models()
@@ -46,13 +49,14 @@ def add_model():
 
 def run_prompt():
     text = entry.get("1.0", tk.END).strip()
-    if not text:
+    if not text or (text == PLACEHOLDER):
         return
     entry.delete("1.0", tk.END)
     chat_history.configure(state='normal')
     chat_history.insert(tk.END, f"User: {text}\n")
     chat_history.see(tk.END)
     chat_history.configure(state='disabled')
+    update_logo_visibility() 
     status.configure(text="Generating...")
 
     def task():
@@ -65,11 +69,12 @@ def run_prompt():
         chat_history.insert(tk.END, f"Assistant: {output_text}\n\n")
         chat_history.see(tk.END)
         chat_history.configure(state='disabled')
+        update_logo_visibility()
         status.configure(text="Done")
 
     threading.Thread(target=task, daemon=True).start()
 
-#UI
+#UI                                  
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
 
@@ -77,7 +82,6 @@ root = ctk.CTk()
 root.title("Offline LLM Switcher")
 root.geometry("900x700")
 root.configure(fg_color=BG_GRAD_TOP)
-
 
 # Left panel with padding
 side_frame = ctk.CTkFrame(root, width=250, fg_color=BG_PANEL, corner_radius=12)
@@ -171,6 +175,19 @@ entry_border.pack(fill="x", padx=10, pady=(0, 6))
 entry_container = ctk.CTkFrame(entry_border, fg_color=BG_LIST, corner_radius=10)
 entry_container.pack(fill="x", padx=4, pady=4)
 
+try:
+    logo_image = Image.open("transparent-logo.png")
+    logo_image = logo_image.resize((200, 200))
+    logo_tk = ImageTk.PhotoImage(logo_image)
+
+    logo_label = tk.Label(chat_border, image=logo_tk, bg=BG_LIST)
+    logo_label.image = logo_tk
+    logo_label.place(relx=0.5, rely=0.5, anchor="center")
+    logo_label.lift()
+except Exception as e:
+    print(f"Error loading logo image: {e}")
+ 
+
 send_btn = ctk.CTkButton(
     entry_container, 
     text="↑", 
@@ -193,7 +210,7 @@ entry = tk.Text(
     height=1,
     wrap="word",
     bg=BG_LIST,
-    fg=TEXT,
+    fg=MUTED,
     insertbackground=TEXT,
     font=FONT_UI,
     relief="flat",
@@ -201,6 +218,37 @@ entry = tk.Text(
     bd=0
 )
 entry.pack(fill="both", expand=True, padx=6, pady=4)
+
+entry.insert("1.0", PLACEHOLDER)
+
+def entry_focus_in(event):
+    if entry.get("1.0", "end-1c") == PLACEHOLDER:
+        entry.delete("1.0", "end")
+        entry.configure(fg=TEXT)
+
+def entry_focus_out(event):
+    if entry.get("1.0", "end-1c").strip() == "":
+        entry.insert("1.0", PLACEHOLDER)
+        entry.configure(fg=MUTED)
+
+def update_logo_visibility():
+    content = chat_history.get("1.0", "end-1c").strip()
+    if content:
+        try:
+            logo_label.place_forget()
+        except:
+            pass
+    else:
+        try:
+            logo_label.place(relx=0.5, rely=0.4, anchor="center")
+            logo.label.lift()
+        except:
+            pass
+
+chat_history.bind("<KeyRelease>", lambda e: update_logo_visibility())
+
+entry.bind("<FocusIn>", entry_focus_in)
+entry.bind("<FocusOut>", entry_focus_out)
 
 def auto_resize(event=None):
     lines = int(entry.index('end-1c').split('.')[0])

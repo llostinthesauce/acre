@@ -168,29 +168,45 @@ chat_history.configure(state='disabled')
 entry_border = ctk.CTkFrame(chat_frame, fg_color=BORDER_ACCENT, corner_radius=12)
 entry_border.pack(fill="x", padx=10, pady=(0, 6))
 
+entry_container = ctk.CTkFrame(entry_border, fg_color=BG_LIST, corner_radius=10)
+entry_container.pack(fill="x", padx=4, pady=4)
 
-entry = ctk.CTkTextbox(
-    entry_border,
-    height=80,
-    corner_radius=10,
-    fg_color=BG_LIST,
-    text_color=TEXT,
-    font=FONT_UI,
-    wrap="word",
-)
-entry.pack(fill="x", padx=4, pady=4)
-
-ctk.CTkButton(
-    chat_frame, 
-    text="Send", 
-    command=run_prompt,
+send_btn = ctk.CTkButton(
+    entry_container, 
+    text="↑", 
+    width=44,
     height=36,
-    corner_radius=14,
+    corner_radius=10,
     fg_color=ACCENT,
     hover_color="#8db9ff",
     text_color="white",
-    font=FONT_BOLD
-).pack(fill="x", padx=10, pady=(0, 10))
+    font=FONT_BOLD,
+    command=run_prompt
+)
+send_btn.pack(side="right", padx=(4, 8), pady=6)
+
+entry_frame = ctk.CTkFrame(entry_container, fg_color=BG_LIST, corner_radius=10)
+entry_frame.pack(side="left", fill="both", expand=True, padx=(8, 4), pady=6)
+
+entry = tk.Text(
+    entry_frame,
+    height=1,
+    wrap="word",
+    bg=BG_LIST,
+    fg=TEXT,
+    insertbackground=TEXT,
+    font=FONT_UI,
+    relief="flat",
+    highlightthickness=0,
+    bd=0
+)
+entry.pack(fill="both", expand=True, padx=6, pady=4)
+
+def auto_resize(event=None):
+    lines = int(entry.index('end-1c').split('.')[0])
+    entry.configure(height=min(max(1, lines), 8))
+
+entry.bind("<KeyRelease>", auto_resize)
 
 
 toggle_state = {"open": True}

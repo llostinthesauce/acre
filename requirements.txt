@@ -1,2 +1,4 @@
-llama-cpp-python
-tk
+customtkinter>=5.2.0
+darkdetect>=0.8.0
+pillow>=10.2.0
+llama-cpp-python>=0.2.80

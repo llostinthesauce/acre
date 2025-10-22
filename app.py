@@ -310,6 +310,14 @@ def build_main_ui()->None:
         lines=int(entry.index('end-1c').split('.')[0])
         entry.configure(height=min(max(1,lines),8))
     entry.bind("<KeyRelease>",auto)
+    def _send_on_return(event):
+        if event.state & 0x0001:  # Shift held -> allow newline
+            return
+        run_prompt()
+        return "break"  # stop Tk from inserting a newline
+    entry.bind("<Return>", _send_on_return)
+    entry.bind("<KP_Enter>", _send_on_return)
+    
     tstate={"open":True}
     def _toggle():
         if tstate["open"]:

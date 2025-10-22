@@ -1,18 +1,38 @@
-# offline llm switcher
+ACRE Offline LLM Switcher (Multi-backend)
 
-this is a python app for switching between local llms.  
-all models must be downloaded manually (gguf/bin format) and dropped into the `/models` folder.
+can run in a .venv, or locally with homebrew. 
+FIRST: /opt/homebrew/bin/python3 -m pip install --user --break-system-packages -r requirements.txt
+THEN: /opt/homebrew/bin/python3 app.py
 
-# how to run
+or
 
-# we need to see if we can implement the gui library inside of the app so that users dont load it and fail if they dont have them pre installed.
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -U pip
+python -m pip install -r requirements.txt
 
-# containerize
+Installed backends:
+- GGUF via llama.cpp (default)
+- Transformers local
+- GPTQ local
 
-# encrypt, password protect
+Model folder rules:
+- file.gguf -> llama.cpp
+- folder with quantize_config.json -> AutoGPTQ (NEED TO TEST THIS)
+- folder with config.json (+ *.bin or *.safetensors) -> Transformers
+- folder with a .gguf inside -> llama.cpp
 
-# where to store user data? database local
+Run:
+python app.py
 
-# ignore models in git push for obvious reasons
+TO DO:
+containerize
+encrypt locally
+bundle dependencies -> vendor? wheelhouse? nvidia torch
+rename chats / models
+rework login
+optimize? // tokens
+more backend / model types and testing
 
-# 
+clean everything up
+settings? color scheme? 

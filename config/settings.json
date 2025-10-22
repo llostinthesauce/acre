@@ -1,5 +1,6 @@
 {
-  "password_hash": "eP90RM482fq579WGlp9PZBeo8S2ARuYxQSnNCKxQ6Ug=",
-  "salt": "VQDkRXe_gIO-vbfHA8eyBA==",
-  "iterations": 480000
+  "username": "admin",
+  "password_hash": "GSsxgIrwp6z__ymZMoE-9LP0UBj7ju23lvIF-x5Ku-4",
+  "salt": "aBbaBuagwuCJxcJvWTLGpA",
+  "iterations": 200000
 }

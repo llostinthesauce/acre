@@ -8,6 +8,11 @@ __pycache__/
 # Virtual environment
 .venv/
 
+# local deps
+vendor/
+outputs/
+history/
+
 # macOS junk
 .DS_Store
 

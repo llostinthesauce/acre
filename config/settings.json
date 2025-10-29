@@ -1,6 +1,31 @@
 {
-  "username": "admin",
-  "password_hash": "GSsxgIrwp6z__ymZMoE-9LP0UBj7ju23lvIF-x5Ku-4",
-  "salt": "aBbaBuagwuCJxcJvWTLGpA",
-  "iterations": 200000
+  "users": {
+    "bub": {
+      "password_hash": "3Az9-lMFc97sQ9Q1Q2uh_ElQS8d2ItIBDB-TsIQmrTM",
+      "salt": "XaCfHPBibW6NxomZ5hJkgg",
+      "iterations": 200000
+    },
+    "toby": {
+      "password_hash": "IdMKF0qC9ABtPW8PkecPZhLmbNiEZfulcfyfQv18O38",
+      "salt": "0IEVnDJN2_DbBiOxLDQ26A",
+      "iterations": 200000,
+      "enc_salt": "33m359dfW-HMXLWSIX8-Bw",
+      "enc_iterations": 200000,
+      "disclaimer_ack": true
+    }
+  },
+  "active_user": "toby",
+  "prefs": {
+    "text_temperature": 0.74,
+    "text_max_tokens": 1024,
+    "image_width": 512,
+    "image_height": 512,
+    "image_steps": 14,
+    "image_guidance": 1.9499999999999993,
+    "image_seed": null,
+    "ui_scale": 0.91,
+    "device_preference": "auto",
+    "history_enabled": true
+  },
+  "per_user": {}
 }

@@ -1,6 +1,7 @@
 import importlib.util
 import json
 import os
+import platform
 import subprocess
 import sys
 from pathlib import Path
@@ -9,6 +10,25 @@ from .constants import MODELS_PATH
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 VENDOR = BASE_DIR / "vendor"
+
+
+def _is_jetson() -> bool:
+    """Detect if running on NVIDIA Jetson platform."""
+    try:
+        # Check for Jetson-specific files
+        if Path("/etc/nv_tegra_release").exists():
+            return True
+        # Check machine architecture
+        machine = platform.machine().lower()
+        if machine in ("aarch64", "arm64") and "jetson" in platform.platform().lower():
+            return True
+        # Check for NVIDIA Jetson in uname
+        uname = platform.uname()
+        if "jetson" in uname.system.lower() or "jetson" in uname.release.lower():
+            return True
+    except Exception:
+        pass
+    return False
 
 
 def _need(mod: str) -> bool:
@@ -44,6 +64,9 @@ def _requires_diffusers() -> bool:
 
 
 def _requires_mlx() -> bool:
+    # MLX is Apple Silicon only, skip on Jetson
+    if _is_jetson():
+        return False
     if not MODELS_PATH.exists():
         return False
     for entry in MODELS_PATH.iterdir():
@@ -90,6 +113,9 @@ def setup_environment() -> None:
     VENDOR.mkdir(exist_ok=True)
     if str(VENDOR) not in sys.path:
         sys.path.insert(0, str(VENDOR))
+    
+    is_jetson = _is_jetson()
+    
     base_packages = [
         ("customtkinter>=5.2.0", "customtkinter"),
         ("pillow>=10.2.0", "PIL"),
@@ -101,26 +127,59 @@ def setup_environment() -> None:
         ("pymupdf>=1.24", "fitz"),
     ]
     _ensure(base_packages)
+    
     if _requires_transformers():
-        transformer_packages = [
-            ("torch>=2.3", "torch"),
-            ("torchvision>=0.18", "torchvision"),
-            ("transformers>=4.52.4", "transformers"),
-        ]
-        _ensure(transformer_packages)
+        # On Jetson, PyTorch should be pre-installed via NVIDIA's method
+        # Don't install from PyPI as it won't work on ARM64
+        if not is_jetson:
+            transformer_packages = [
+                ("torch>=2.3", "torch"),
+                ("torchvision>=0.18", "torchvision"),
+                ("transformers>=4.52.4", "transformers"),
+            ]
+            _ensure(transformer_packages)
+        else:
+            # On Jetson, only install transformers if torch is already available
+            if not _need("torch"):
+                transformers_only = [
+                    ("transformers>=4.52.4", "transformers"),
+                ]
+                _ensure(transformers_only)
+            else:
+                print("WARNING: PyTorch not found on Jetson. Please install PyTorch for Jetson first.")
+                print("See JETSON_SETUP.md for instructions.")
+    
     if _requires_mlx():
         mlx_packages = [
             ("mlx-lm>=0.25.2", "mlx_lm"),
         ]
         _ensure(mlx_packages)
+    
     if not _requires_diffusers():
         return
-    diffusion_packages = [
-        ("torch>=2.3", "torch"),
-        ("transformers>=4.52.4", "transformers"),
-        ("diffusers>=0.25", "diffusers"),
-        ("safetensors>=0.4", "safetensors"),
-        ("huggingface_hub>=0.23", "huggingface_hub"),
-        ("accelerate>=0.31", "accelerate"),
-    ]
-    _ensure(diffusion_packages)
+    
+    # For diffusers, same logic - skip torch on Jetson
+    if not is_jetson:
+        diffusion_packages = [
+            ("torch>=2.3", "torch"),
+            ("transformers>=4.52.4", "transformers"),
+            ("diffusers>=0.25", "diffusers"),
+            ("safetensors>=0.4", "safetensors"),
+            ("huggingface_hub>=0.23", "huggingface_hub"),
+            ("accelerate>=0.31", "accelerate"),
+        ]
+        _ensure(diffusion_packages)
+    else:
+        # On Jetson, install diffusers dependencies if torch is available
+        if not _need("torch"):
+            diffusion_packages = [
+                ("transformers>=4.52.4", "transformers"),
+                ("diffusers>=0.25", "diffusers"),
+                ("safetensors>=0.4", "safetensors"),
+                ("huggingface_hub>=0.23", "huggingface_hub"),
+                ("accelerate>=0.31", "accelerate"),
+            ]
+            _ensure(diffusion_packages)
+        else:
+            print("WARNING: PyTorch not found on Jetson. Please install PyTorch for Jetson first.")
+            print("See JETSON_SETUP.md for instructions.")

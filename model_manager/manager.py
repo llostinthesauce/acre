@@ -180,9 +180,16 @@ class ModelManager:
                 raise RuntimeError("unknown backend")
         except Exception as exc:
             self._reset_session()
-            message = str(exc)
-            if "VisionEncoderDecoder" in message or "image-to-text" in message:
-                message = "This model is an OCR (image→text) model; use the OCR pipeline."
+            if self._looks_like_oom(exc):
+                self.cleanup_memory()
+                message = (
+                    "Out of memory while loading this model. Switch the device preference to CPU or pick a smaller build, "
+                    "then try again. Caches were cleared."
+                )
+            else:
+                message = str(exc)
+                if "VisionEncoderDecoder" in message or "image-to-text" in message:
+                    message = "This model is an OCR (image→text) model; use the OCR pipeline."
             return (False, message)
         self._backend = self._impl.name
         self._current_model_name = name
@@ -198,6 +205,12 @@ class ModelManager:
             except Exception:
                 pass
         self._reset_session()
+        self.cleanup_memory()
+
+    def is_loaded(self) -> bool:
+        return self._impl is not None
+
+    def cleanup_memory(self) -> None:
         try:
             import torch
 
@@ -208,9 +221,6 @@ class ModelManager:
         except Exception:
             pass
         gc.collect()
-
-    def is_loaded(self) -> bool:
-        return self._impl is not None
 
     @property
     def backend(self) -> str:
@@ -265,6 +275,11 @@ class ModelManager:
             return text
         except Exception as exc:
             self._history = snapshot
+            if self._looks_like_oom(exc):
+                self.cleanup_memory()
+                raise RuntimeError(
+                    "Generation failed: out of memory. Lower max tokens, disable chat history, or run Free VRAM from Settings."
+                ) from exc
             raise RuntimeError(f"Generation failed: {exc}") from exc
         finally:
             if stop_backup is not None:
@@ -335,6 +350,49 @@ class ModelManager:
         self._history_file = None
         self._history = []
         self._kind = "text"
+
+    def describe_session(self) -> str:
+        if not self._impl or not self._current_model_name:
+            return "No model loaded."
+        details = [
+            f"Model: {self._current_model_name}",
+            f"Backend: {self._backend or 'unknown'}",
+        ]
+        inspector = getattr(self._impl, "runtime_info", None)
+        runtime: dict[str, Any] = {}
+        if callable(inspector):
+            try:
+                runtime = inspector() or {}
+            except Exception:
+                runtime = {}
+        device = runtime.get("device") or self._device_pref or "cpu"
+        details.append(f"Device: {device}")
+        dtype = runtime.get("dtype")
+        if dtype:
+            details.append(f"Precision: {dtype}")
+        context = runtime.get("max_position_embeddings") or runtime.get("tokenizer_max_length")
+        if context:
+            details.append(f"Context limit: {context} tokens")
+        details.append(f"Max tokens: {self._config.max_tokens}")
+        details.append(f"Temperature: {self._config.temperature}")
+        details.append(f"History: {'on' if self._history_enabled else 'off'}")
+        return "\n".join(details)
+
+    def _looks_like_oom(self, exc: Exception) -> bool:
+        try:
+            import torch
+
+            if isinstance(exc, torch.cuda.OutOfMemoryError):
+                return True
+        except Exception:
+            pass
+        message = str(exc).lower()
+        if not message:
+            return False
+        for token in ("out of memory", "mps backend", "unable to allocate", "cuda error 2"):
+            if token in message:
+                return True
+        return False
 
     def _load_history(self) -> List[dict]:
         if not self._history_file or not self._history_file.exists():

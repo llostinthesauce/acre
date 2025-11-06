@@ -1,8 +1,9 @@
 import base64
 import json
 import secrets
+import time
 from hashlib import pbkdf2_hmac
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from .constants import CONFIG_PATH
 
@@ -160,3 +161,74 @@ def set_disclaimer_ack(settings: dict, username: str, value: bool) -> None:
         return
     record["disclaimer_ack"] = bool(value)
     save_settings(settings)
+
+
+def set_remember_me(settings: dict, username: str, key: bytes, expires_at: float) -> None:
+    record = ensure_users_bucket(settings).get(username)
+    if not record:
+        return
+    record["remember_key"] = encode_b64(key)
+    record["remember_expires"] = float(expires_at)
+    save_settings(settings)
+
+
+def clear_remember_me(settings: dict, username: str) -> None:
+    record = ensure_users_bucket(settings).get(username)
+    if not record:
+        return
+    changed = False
+    if record.pop("remember_key", None) is not None:
+        changed = True
+    if record.pop("remember_expires", None) is not None:
+        changed = True
+    if changed:
+        save_settings(settings)
+
+
+def get_remembered_user(settings: dict) -> Optional[Tuple[str, bytes]]:
+    users = ensure_users_bucket(settings)
+    if not users:
+        return None
+    now = time.time()
+    changed = False
+
+    def resolve(name: str, record: dict) -> Optional[bytes]:
+        nonlocal changed
+        key_b64 = record.get("remember_key")
+        expires = record.get("remember_expires")
+        if not key_b64 or expires is None:
+            return None
+        try:
+            expiry_value = float(expires)
+        except Exception:
+            expiry_value = 0.0
+        if expiry_value <= now:
+            record.pop("remember_key", None)
+            record.pop("remember_expires", None)
+            changed = True
+            return None
+        try:
+            return decode_b64(str(key_b64))
+        except Exception:
+            record.pop("remember_key", None)
+            record.pop("remember_expires", None)
+            changed = True
+            return None
+
+    preferred = get_active_user(settings)
+    if preferred:
+        record = users.get(preferred, {})
+        key = resolve(preferred, record)
+        if key:
+            if changed:
+                save_settings(settings)
+            return (preferred, key)
+    for name, record in users.items():
+        key = resolve(name, record)
+        if key:
+            if changed:
+                save_settings(settings)
+            return (name, key)
+    if changed:
+        save_settings(settings)
+    return None

@@ -14,7 +14,18 @@ python -m pip install -r requirements.txt
 
 ### NVIDIA Jetson
 For NVIDIA Jetson devices, see [JETSON_SETUP.md](JETSON_SETUP.md) for detailed instructions.
-Quick setup: `./setup_jetson.sh`
+
+**Jetson Orin Nano (JetPack 6.2):**
+```bash
+chmod +x install_jetson_orin_nano.sh
+./install_jetson_orin_nano.sh
+```
+
+**Other Jetson models:**
+```bash
+chmod +x setup_jetson.sh
+./setup_jetson.sh
+```
 
 Installed backends:
 - GGUF via llama.cpp (default)

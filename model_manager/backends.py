@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import gc
 import json
+import threading
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -92,31 +93,40 @@ class LlamaCppBackend(BaseBackend):
             kwargs["n_threads"] = int(n_threads)
         if n_ctx and n_ctx > 0:
             kwargs["n_ctx"] = int(n_ctx)
-        if n_gpu_layers is not None and n_gpu_layers >= 0:
+        # n_gpu_layers can be -1 (all layers) or >= 0 (specific number)
+        if n_gpu_layers is not None:
             kwargs["n_gpu_layers"] = int(n_gpu_layers)
         self._llama = Llama(**kwargs)
+        # llama.cpp is not thread-safe - lock protects model access
+        self._lock = threading.Lock()
 
     @property
     def name(self) -> str:
         return "llama_cpp"
 
     def generate(self, prompt_text: str, cfg: GenerationConfig) -> str:
-        output = self._llama(
-            prompt_text,
-            max_tokens=cfg.max_tokens,
-            temperature=cfg.temperature,
-            stop=cfg.stop if cfg.stop else None,
-            echo=False,
-        )
-        text = output["choices"][0]["text"]
-        if cfg.stop:
-            for stop_token in cfg.stop:
-                if stop_token in text:
-                    text = text.split(stop_token, 1)[0]
-        return text.strip()
+        # llama.cpp is not thread-safe - must lock during generation
+        with self._lock:
+            if self._llama is None:
+                raise RuntimeError("Model has been unloaded")
+            output = self._llama(
+                prompt_text,
+                max_tokens=cfg.max_tokens,
+                temperature=cfg.temperature,
+                stop=cfg.stop if cfg.stop else None,
+                echo=False,
+            )
+            text = output["choices"][0]["text"]
+            if cfg.stop:
+                for stop_token in cfg.stop:
+                    if stop_token in text:
+                        text = text.split(stop_token, 1)[0]
+            return text.strip()
 
     def unload(self) -> None:
-        self._llama = None
+        # Wait for any ongoing generation to complete before unloading
+        with self._lock:
+            self._llama = None
 
 
 class HFBackend(BaseBackend):

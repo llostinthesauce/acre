@@ -1,8 +1,10 @@
 import gc
 import os
+import time
 import tkinter as tk
 from pathlib import Path
 from tkinter import messagebox
+from typing import Optional
 
 import customtkinter as ctk
 from PIL import Image, ImageTk
@@ -47,10 +49,12 @@ from .gallery import ensure_user_dirs, refresh_gallery
 from .models import add_model, pick_model, refresh_list, rename_model
 from .prompt import run_prompt
 from .settings import (
+    clear_remember_me,
     ensure_users_bucket,
     ensure_encryption_metadata,
     get_active_user,
     get_prefs,
+    get_remembered_user,
     list_usernames,
     load_settings,
     save_settings,
@@ -58,6 +62,7 @@ from .settings import (
     set_credentials,
     set_prefs,
     set_disclaimer_ack,
+    set_remember_me,
     verify_password,
 )
 from .ui_helpers import apply_native_font_scale, update_logo_visibility, update_status
@@ -79,6 +84,14 @@ def _clear_all_histories() -> None:
 
 
 def _clear_caches() -> None:
+    mgr = gs.mgr
+    if mgr:
+        try:
+            mgr.cleanup_memory()
+            update_status("Caches cleared.")
+            return
+        except Exception:
+            pass
     try:
         import torch
 
@@ -197,6 +210,9 @@ def logout_action() -> None:
             gs.mgr.unload()
     except Exception:
         pass
+    if gs.current_user:
+        settings = load_settings()
+        clear_remember_me(settings, gs.current_user)
     gs.current_user = None
     gs.pending_user = None
     gs.encryption_key = None
@@ -946,6 +962,16 @@ def build_gate_ui() -> None:
     settings = load_settings()
     users = list_usernames(settings)
     first_run = len(users) == 0
+    remembered_info = get_remembered_user(settings)
+    remember_ready: Optional[tuple[str, bytes]] = None
+    remember_pending: Optional[tuple[str, bytes]] = None
+    if remembered_info:
+        remembered_user, remembered_key = remembered_info
+        record = ensure_users_bucket(settings).get(remembered_user, {})
+        if record and record.get("disclaimer_ack"):
+            remember_ready = (remembered_user, remembered_key)
+        else:
+            remember_pending = (remembered_user, remembered_key)
     gs.login_password_entry = None
     gs.pending_user = None
     gs.encryption_key = None
@@ -1075,8 +1101,29 @@ def build_gate_ui() -> None:
     form.pack(pady=12, padx=12)
     form.grid_columnconfigure(1, weight=1)
     users_list = users or ["admin"]
-    who_var = tk.StringVar(value=get_active_user(settings) or users_list[0])
+    preferred_user = get_active_user(settings)
+    if not preferred_user or preferred_user not in users_list:
+        if remembered_info and remembered_info[0] in users_list:
+            preferred_user = remembered_info[0]
+        else:
+            preferred_user = users_list[0]
+    who_var = tk.StringVar(value=preferred_user)
     password_login = tk.StringVar(value="")
+    def has_valid_remember(user: str) -> bool:
+        record = ensure_users_bucket(settings).get(user, {})
+        if not isinstance(record, dict):
+            return False
+        try:
+            expiry_value = float(record.get("remember_expires", 0))
+        except Exception:
+            expiry_value = 0.0
+        return bool(record.get("remember_key") and expiry_value > time.time())
+
+    remember_var = tk.BooleanVar(value=has_valid_remember(preferred_user))
+    def on_user_select(*_args) -> None:
+        remember_var.set(has_valid_remember(who_var.get().strip()))
+
+    who_var.trace_add("write", on_user_select)
     ctk.CTkLabel(form, text="User", text_color=TEXT, font=FONT_UI).grid(
         row=0, column=0, padx=8, pady=8, sticky="w"
     )
@@ -1092,6 +1139,16 @@ def build_gate_ui() -> None:
     )
     password_entry.grid(row=1, column=1, padx=8, pady=8, sticky="we")
     gs.login_password_entry = password_entry
+    remember_box = ctk.CTkCheckBox(
+        form,
+        text="Remember me on this device for 30 days",
+        variable=remember_var,
+        text_color=TEXT,
+        fg_color=ACCENT,
+        hover_color=ACCENT_HOVER,
+        font=FONT_UI,
+    )
+    remember_box.grid(row=2, column=0, columnspan=2, padx=8, pady=(0, 4), sticky="w")
     if gs.root:
         gs.root.after(100, lambda: password_entry.focus_force())
 
@@ -1127,6 +1184,11 @@ def build_gate_ui() -> None:
             return
         gs.encryption_key = key
         gs.pending_user = username
+        if remember_var.get():
+            expires_at = time.time() + 30 * 24 * 60 * 60
+            set_remember_me(settings_local, username, key, expires_at)
+        else:
+            clear_remember_me(settings_local, username)
         set_active_user(settings_local, username)
         password_login.set("")
         if bool(record.get("disclaimer_ack")):
@@ -1263,7 +1325,21 @@ def build_gate_ui() -> None:
         font=FONT_BOLD,
         command=back_to_auth,
     ).pack(pady=(0, 12))
-    show_frame(gs.setup_frame if first_run else gs.login_frame)
+
+    if remember_ready:
+        set_active_user(settings, remember_ready[0])
+        gs.pending_user = remember_ready[0]
+        gs.encryption_key = remember_ready[1]
+        complete_login(mark_ack=False)
+        return
+
+    target_frame = gs.setup_frame if first_run else gs.login_frame
+    if remember_pending:
+        set_active_user(settings, remember_pending[0])
+        gs.pending_user = remember_pending[0]
+        gs.encryption_key = remember_pending[1]
+        target_frame = gs.disc_frame
+    show_frame(target_frame)
 
 
 def on_close() -> None:

@@ -1,15 +1,20 @@
 ACRE Offline LLM Switcher (Multi-backend)
 
-can run in a .venv, or locally with homebrew. 
+## Installation
+
+### macOS (Homebrew)
 FIRST: /opt/homebrew/bin/python3 -m pip install --user --break-system-packages -r requirements.txt
 THEN: /opt/homebrew/bin/python3 app.py
 
-or
-
+### Standard Python venv
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -U pip
 python -m pip install -r requirements.txt
+
+### NVIDIA Jetson
+For NVIDIA Jetson devices, see [JETSON_SETUP.md](JETSON_SETUP.md) for detailed instructions.
+Quick setup: `./setup_jetson.sh`
 
 Installed backends:
 - GGUF via llama.cpp (default)
@@ -24,6 +29,18 @@ Model folder rules:
 
 Run:
 python app.py
+
+## Platform Support
+
+- ✅ macOS (Intel & Apple Silicon)
+- ✅ Linux (x86_64)
+- ✅ NVIDIA Jetson (ARM64) - See [JETSON_SETUP.md](JETSON_SETUP.md)
+
+## Notes
+
+- MLX models are Apple Silicon only (not supported on Jetson)
+- PyTorch on Jetson must be installed from NVIDIA's wheels (not PyPI)
+- GGUF models work best on Jetson devices
 
 TO DO:
 containerize

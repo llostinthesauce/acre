@@ -66,11 +66,8 @@ def pick_model() -> None:
         from .attachments import refresh_attach_row
 
         render_history()
-        backend = getattr(gs.mgr, "backend", None)
-        if backend:
-            update_status(f"Model loaded: {choice} ({backend})")
-        else:
-            update_status(f"Model loaded: {choice}")
+        summary = gs.mgr.describe_session()
+        update_status(summary)
         refresh_attach_row()
     else:
         detail = f" — {message}" if message else ""

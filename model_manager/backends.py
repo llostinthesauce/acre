@@ -1,14 +1,32 @@
 from __future__ import annotations
 
+import gc
+import json
 import time
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import soundfile as sf
 import torch
 from PIL import Image
 
 from .config import GenerationConfig
+
+try:
+    from transformers.cache_utils import DynamicCache
+
+    if not hasattr(DynamicCache, "seen_tokens"):
+        DynamicCache.seen_tokens = property(lambda self: self.get_seq_length())  # type: ignore[attr-defined]
+    if not hasattr(DynamicCache, "get_max_length"):
+        def _get_max_length(self, layer_idx: int = 0) -> int:
+            try:
+                return self.get_max_cache_shape(layer_idx)
+            except Exception:
+                return -1
+
+        DynamicCache.get_max_length = _get_max_length  # type: ignore[attr-defined]
+except Exception:
+    DynamicCache = None  # type: ignore[assignment]  # noqa: N816
 
 
 class BaseBackend:
@@ -24,6 +42,9 @@ class BaseBackend:
     @property
     def name(self) -> str:
         raise NotImplementedError
+
+    def runtime_info(self) -> Dict[str, Any]:
+        return {}
 
 
 def pick_device(pref: str) -> str:
@@ -99,28 +120,252 @@ class HFBackend(BaseBackend):
             from transformers import AutoModelForCausalLM, AutoTokenizer
         except Exception:
             raise RuntimeError("transformers and torch required")
-        self._tokenizer = AutoTokenizer.from_pretrained(
-            str(model_dir), local_files_only=True
-        )
+        trust_remote = self._should_trust_remote_code(model_dir)
+        tokenizer_kwargs: dict[str, Any] = {"pretrained_model_name_or_path": str(model_dir), "local_files_only": True}
+        model_kwargs: dict[str, Any] = {
+            "pretrained_model_name_or_path": str(model_dir),
+            "local_files_only": True,
+            "torch_dtype": "auto",
+            "low_cpu_mem_usage": True,
+        }
+        if trust_remote:
+            tokenizer_kwargs["trust_remote_code"] = True
+            model_kwargs["trust_remote_code"] = True
+        self._tokenizer = self._load_tokenizer(AutoTokenizer, tokenizer_kwargs, model_dir)
         import torch
 
         self._device = pick_device(device_pref)
-        self._model = AutoModelForCausalLM.from_pretrained(
-            str(model_dir), local_files_only=True, dtype="auto"
-        )
+        self._model = self._load_model(AutoModelForCausalLM, model_kwargs)
         if self._device != "cpu":
             self._model.to(self._device)
+        self._model.eval()
+        config = getattr(self._model, "config", None)
+        if config is not None and not hasattr(config, "num_hidden_layers"):
+            candidate = getattr(config, "num_transformer_layers", None)
+            if isinstance(candidate, int) and candidate > 0:
+                try:
+                    setattr(config, "num_hidden_layers", candidate)
+                except Exception:
+                    pass
+        if config is not None and hasattr(config, "use_cache"):
+            try:
+                setattr(config, "use_cache", False)
+            except Exception:
+                pass
+        gen_conf = getattr(self._model, "generation_config", None)
+        if gen_conf is not None:
+            try:
+                setattr(gen_conf, "use_cache", False)
+            except Exception:
+                pass
+            try:
+                setattr(gen_conf, "cache_implementation", "static")
+            except Exception:
+                pass
+        if getattr(self._tokenizer, "pad_token_id", None) is None and getattr(self._tokenizer, "eos_token", None):
+            try:
+                self._tokenizer.pad_token = self._tokenizer.eos_token  # type: ignore[assignment]
+            except Exception:
+                pass
+
+    def _load_model(self, factory, kwargs: Dict[str, Any]):
+        try:
+            return factory.from_pretrained(**kwargs)
+        except ValueError as exc:
+            message = str(exc)
+            if "Unrecognized configuration class" in message or "trust_remote_code" in message or "requires you to execute" in message:
+                retry_kwargs = dict(kwargs)
+                retry_kwargs["trust_remote_code"] = True
+                return factory.from_pretrained(**retry_kwargs)
+            raise
+        except RuntimeError as exc:
+            if not self._should_retry_on_oom(exc):
+                raise
+            self._device = "cpu"
+            self._empty_device_caches()
+            retry_kwargs = dict(kwargs)
+            retry_kwargs["torch_dtype"] = torch.float32
+            retry_kwargs["low_cpu_mem_usage"] = True
+            return factory.from_pretrained(**retry_kwargs)
+
+    def _load_tokenizer(self, factory, kwargs: Dict[str, Any], model_dir: Path):
+        try:
+            return factory.from_pretrained(**kwargs)
+        except ValueError as exc:
+            message = str(exc)
+            if "Unrecognized configuration class" in message or "trust_remote_code" in message or "requires you to execute" in message:
+                retry_kwargs = dict(kwargs)
+                retry_kwargs["trust_remote_code"] = True
+                try:
+                    return factory.from_pretrained(**retry_kwargs)
+                except ValueError:
+                    return self._load_tokenizer_override(factory, retry_kwargs, model_dir, str(exc))
+            return self._load_tokenizer_override(factory, kwargs, model_dir, message)
+        except OSError as exc:
+            return self._load_tokenizer_override(factory, kwargs, model_dir, str(exc))
+
+    def _load_tokenizer_override(
+        self,
+        factory,
+        kwargs: Dict[str, Any],
+        model_dir: Path,
+        original_message: str,
+    ):
+        override_path = self._resolve_tokenizer_override(model_dir)
+        if not override_path:
+            raise RuntimeError(
+                f"Tokenizer could not be loaded for {model_dir.name}. {original_message}. "
+                "Add a LLaMA-compatible tokenizer by either (1) dropping tokenizer.json/tokenizer.model/"
+                "tokenizer_config.json/special_tokens_map.json into a 'tokenizer' subfolder inside the model "
+                "directory, or (2) creating tokenizer_source.txt next to the model with a relative or absolute "
+                "path to an existing tokenizer (e.g. '../Llama-3.2-3B-Instruct')."
+            )
+        override_kwargs = dict(kwargs)
+        override_kwargs["pretrained_model_name_or_path"] = override_path
+        override_kwargs.setdefault("local_files_only", True)
+        try:
+            return factory.from_pretrained(**override_kwargs)
+        except Exception as exc:
+            raise RuntimeError(
+                f"Tokenizer override at {override_path} failed: {exc}. "
+                "Ensure the tokenizer directory contains tokenizer.json/tokenizer.model."
+            ) from exc
+
+    def _resolve_tokenizer_override(self, model_dir: Path) -> Optional[str]:
+        explicit = model_dir / "tokenizer_source.txt"
+        if explicit.exists():
+            for raw_line in explicit.read_text().splitlines():
+                line = raw_line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                candidate = self._expand_tokenizer_hint(model_dir, line)
+                if candidate and self._looks_like_tokenizer_dir(candidate):
+                    return str(candidate)
+        fallback_dir = model_dir / "tokenizer"
+        if fallback_dir.exists() and self._looks_like_tokenizer_dir(fallback_dir):
+            return str(fallback_dir)
+        sibling = model_dir.with_name(f"{model_dir.name}-tokenizer")
+        if sibling.exists() and self._looks_like_tokenizer_dir(sibling):
+            return str(sibling)
+        return None
+
+    def _expand_tokenizer_hint(self, model_dir: Path, hint: str) -> Optional[Path]:
+        guess = Path(hint)
+        search_order = []
+        if guess.is_absolute():
+            search_order.append(guess)
+        else:
+            search_order.extend(
+                [
+                    (model_dir / guess).resolve(),
+                    (Path.cwd() / guess).resolve(),
+                    (model_dir.parent / guess).resolve(),
+                ]
+            )
+        for path in search_order:
+            if path.exists():
+                return path
+        return None
+
+    def _looks_like_tokenizer_dir(self, path: Path) -> bool:
+        if not path.is_dir():
+            return False
+        expected = {"tokenizer.json", "tokenizer.model", "tokenizer_config.json", "vocab.json", "merges.txt"}
+        entries = {entry.name for entry in path.iterdir()}
+        return bool(expected & entries)
+
+    def _should_retry_on_oom(self, exc: Exception) -> bool:
+        if isinstance(exc, torch.cuda.OutOfMemoryError):
+            return True
+        text = str(exc).lower()
+        if "out of memory" in text or "mps backend" in text or "unable to allocate" in text:
+            return self._device != "cpu"
+        return False
+
+    def _empty_device_caches(self) -> None:
+        try:
+            if hasattr(torch, "cuda") and torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            if hasattr(torch, "mps") and hasattr(torch.mps, "empty_cache"):
+                torch.mps.empty_cache()
+        except Exception:
+            pass
+        gc.collect()
+
+    def _should_trust_remote_code(self, model_dir: Path) -> bool:
+        config_path = model_dir / "config.json"
+        if not config_path.exists():
+            return False
+        try:
+            config_data = json.loads(config_path.read_text())
+        except Exception:
+            return False
+        auto_map = config_data.get("auto_map")
+        if not auto_map:
+            return False
+        if isinstance(auto_map, dict):
+            for value in auto_map.values():
+                if self._contains_remote_reference(value, model_dir):
+                    return True
+        return False
+
+    def _contains_remote_reference(self, value: Any, model_dir: Path) -> bool:
+        if isinstance(value, str):
+            if value.startswith("transformers_modules."):
+                return True
+            module_name = value.split(".")[0]
+            candidate = model_dir / f"{module_name.replace('.', '/')}.py"
+            if candidate.exists():
+                return True
+            # Some repos place files under src/
+            candidate = model_dir / "src" / f"{module_name.replace('.', '/')}.py"
+            if candidate.exists():
+                return True
+            return False
+        if isinstance(value, list):
+            return any(self._contains_remote_reference(item, model_dir) for item in value)
+        return False
 
     @property
     def name(self) -> str:
         return "transformers"
 
+    def runtime_info(self) -> Dict[str, Any]:
+        info: Dict[str, Any] = {"device": self._device}
+        try:
+            param = next(self._model.parameters())
+            info["dtype"] = str(param.dtype)
+        except Exception:
+            pass
+        context_limit = getattr(self._model.config, "max_position_embeddings", None)
+        if isinstance(context_limit, int):
+            info["max_position_embeddings"] = context_limit
+        tokenizer_limit = getattr(self._tokenizer, "model_max_length", None)
+        if isinstance(tokenizer_limit, int):
+            info["tokenizer_max_length"] = tokenizer_limit
+        return info
+
     def generate(self, prompt_text: str, cfg: GenerationConfig) -> str:
         import torch
 
+        add_special = bool(getattr(self._tokenizer, "add_bos_token", False))
         encoded = self._tokenizer(
-            prompt_text, return_tensors="pt", add_special_tokens=False
+            prompt_text, return_tensors="pt", add_special_tokens=add_special
         )
+        if (
+            not add_special
+            and getattr(self._tokenizer, "bos_token_id", None) is not None
+            and encoded["input_ids"].shape[1] > 0
+        ):
+            bos_id = self._tokenizer.bos_token_id
+            if bos_id is not None and encoded["input_ids"][0, 0].item() != bos_id:
+                bos_tensor = torch.tensor([[bos_id]], device=encoded["input_ids"].device)
+                encoded["input_ids"] = torch.cat([bos_tensor, encoded["input_ids"]], dim=1)
+                if "attention_mask" in encoded:
+                    encoded["attention_mask"] = torch.cat(
+                        [torch.ones((1, 1), device=encoded["attention_mask"].device, dtype=encoded["attention_mask"].dtype), encoded["attention_mask"]],  # type: ignore[arg-type]
+                        dim=1,
+                    )
         if self._device != "cpu":
             encoded = {k: v.to(self._device) for k, v in encoded.items()}
         max_ctx = getattr(
@@ -138,31 +383,55 @@ class HFBackend(BaseBackend):
             input_len = int(encoded["input_ids"].shape[1])
         new_tokens = max(1, min(desired_new, max_ctx - input_len))
         do_sample = cfg.temperature > 0.0
-        try:
-            generated = self._model.generate(
-                **encoded,
-                max_new_tokens=new_tokens,
-                do_sample=do_sample,
-                temperature=float(cfg.temperature) if do_sample else None,
-                pad_token_id=self._tokenizer.eos_token_id,
-                eos_token_id=self._tokenizer.eos_token_id,
-            )
-        except Exception as exc:
-            try:
-                self._model.to("cpu")
-                encoded = {k: v.to("cpu") for k, v in encoded.items()}
-                generated = self._model.generate(
-                    **encoded,
-                    max_new_tokens=new_tokens,
-                    do_sample=False,
-                    pad_token_id=self._tokenizer.eos_token_id,
-                    eos_token_id=self._tokenizer.eos_token_id,
+        attention = encoded.get("attention_mask")
+        prompt_ids = encoded["input_ids"]
+        eos_token_id = getattr(self._tokenizer, "eos_token_id", None)
+        model_vocab = int(getattr(self._model.config, "vocab_size", 0) or 0)
+        if model_vocab:
+            prompt_ids = prompt_ids.clamp(min=0, max=model_vocab - 1)
+        generation_ids = prompt_ids.clone().cpu()
+        temperature = float(cfg.temperature) if do_sample else 1.0
+        temperature = max(temperature, 1e-4)
+
+        total_ids = prompt_ids
+        attn_ids = attention
+        with torch.no_grad():
+            for _ in range(new_tokens):
+                if model_vocab:
+                    total_ids = total_ids.clamp(min=0, max=model_vocab - 1)
+                outputs = self._model(
+                    input_ids=total_ids,
+                    attention_mask=attn_ids,
+                    use_cache=False,
                 )
-            except Exception as second:
-                raise RuntimeError(
-                    "Transformers generation failed; try lowering tokens or temperature"
-                ) from second
-        text = self._tokenizer.decode(generated[0], skip_special_tokens=True)
+                logits = outputs.logits[:, -1, :].float()
+                vocab_size = getattr(self._model.config, "vocab_size", logits.shape[-1])
+                if do_sample:
+                    probs = torch.softmax(logits / temperature, dim=-1)
+                    next_token = torch.multinomial(probs, num_samples=1)
+                else:
+                    next_token = torch.argmax(logits, dim=-1, keepdim=True)
+                token_value = int(next_token.item())
+                if token_value < 0 or token_value >= vocab_size:
+                    token_value = max(0, min(vocab_size - 1, token_value))
+                    next_token = torch.tensor([[token_value]], device=total_ids.device, dtype=total_ids.dtype)
+                total_ids = torch.cat([total_ids, next_token], dim=1)
+                if attn_ids is not None:
+                    ones = torch.ones(
+                        (attn_ids.shape[0], 1),
+                        dtype=attn_ids.dtype,
+                        device=attn_ids.device,
+                    )
+                    attn_ids = torch.cat([attn_ids, ones], dim=1)
+                generation_ids = torch.cat([generation_ids, next_token.cpu()], dim=1)
+                if eos_token_id is not None and token_value == eos_token_id:
+                    break
+                if total_ids.shape[1] > max_ctx:
+                    shift = total_ids.shape[1] - max_ctx
+                    total_ids = total_ids[:, -max_ctx:]
+                    if attn_ids is not None:
+                        attn_ids = attn_ids[:, -max_ctx:]
+        text = self._tokenizer.decode(generation_ids[0], skip_special_tokens=True)
         if prompt_text and text.startswith(prompt_text):
             text = text[len(prompt_text) :]
         if cfg.stop:

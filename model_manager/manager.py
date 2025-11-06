@@ -3,6 +3,7 @@ from __future__ import annotations
 import gc
 import json
 import re
+import threading
 from pathlib import Path
 from typing import Any, List, Optional, Tuple
 
@@ -42,6 +43,8 @@ class ModelManager:
         self._llama_gpu_layers: Optional[int] = self._suggest_llama_gpu_layers(device_pref)
         self._kind: str = "text"
         self._encryptor: Optional[Any] = None
+        self._generation_lock = threading.Lock()
+        self._generating = False
 
     def set_encryptor(self, encryptor: Optional[Any]) -> None:
         self._encryptor = encryptor
@@ -80,17 +83,47 @@ class ModelManager:
             return -1
         if pref == "mps":
             return -1
+        if pref == "cpu":
+            return 0
         if pref != "auto":
             return 0
+        
+        # Check for CUDA via PyTorch (if available)
         try:
             import torch
-
             if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
                 return -1
             if torch.cuda.is_available():
                 return -1
         except Exception:
-            return 0
+            pass
+        
+        # Check for CUDA on Jetson/Linux systems (even without PyTorch)
+        # Check for NVIDIA GPU via nvidia-smi or CUDA libraries
+        try:
+            import subprocess
+            result = subprocess.run(
+                ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
+                capture_output=True,
+                text=True,
+                timeout=2
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                # CUDA is available, use GPU for all layers
+                return -1
+        except Exception:
+            pass
+        
+        # Check for Jetson-specific files
+        try:
+            from pathlib import Path
+            if Path("/etc/nv_tegra_release").exists():
+                # This is a Jetson device, assume CUDA is available
+                # llama-cpp-python should have been built with CUDA support
+                return -1
+        except Exception:
+            pass
+        
         return 0
 
     def _detect_backend(self, candidate: Path) -> Tuple[str, Path, str]:
@@ -250,40 +283,50 @@ class ModelManager:
             raise RuntimeError("No model loaded.")
         if self._kind != "text":
             raise RuntimeError("Loaded model is not a text generator.")
-        snapshot = list(self._history)
-        self._history.append({"role": "user", "content": user_prompt})
-        use_template = hasattr(self._impl, "format_chat")
-        stop_backup: Optional[Tuple[str, ...]] = None
-        prompt: str
-        if use_template:
-            prompt = self._format_with_template()
-            if prompt:
-                stop_backup = self._config.stop
-                self._config.stop = ()
-            else:
-                use_template = False
-        if not use_template:
-            prompt = self._build_prompt_plain() if self._history_enabled else user_prompt
+        
+        # Prevent concurrent generation (llama.cpp is not thread-safe)
+        if not self._generation_lock.acquire(blocking=False):
+            raise RuntimeError("Generation already in progress. Please wait for the current request to complete.")
+        
         try:
-            text = self._impl.generate(prompt, self._config)
-            text = self._postprocess_response(text)
-            if self._history_enabled:
-                self._history.append({"role": "assistant", "content": text})
-                self._save_history()
-            else:
+            self._generating = True
+            snapshot = list(self._history)
+            self._history.append({"role": "user", "content": user_prompt})
+            use_template = hasattr(self._impl, "format_chat")
+            stop_backup: Optional[Tuple[str, ...]] = None
+            prompt: str
+            if use_template:
+                prompt = self._format_with_template()
+                if prompt:
+                    stop_backup = self._config.stop
+                    self._config.stop = ()
+                else:
+                    use_template = False
+            if not use_template:
+                prompt = self._build_prompt_plain() if self._history_enabled else user_prompt
+            try:
+                text = self._impl.generate(prompt, self._config)
+                text = self._postprocess_response(text)
+                if self._history_enabled:
+                    self._history.append({"role": "assistant", "content": text})
+                    self._save_history()
+                else:
+                    self._history = snapshot
+                return text
+            except Exception as exc:
                 self._history = snapshot
-            return text
-        except Exception as exc:
-            self._history = snapshot
-            if self._looks_like_oom(exc):
-                self.cleanup_memory()
-                raise RuntimeError(
-                    "Generation failed: out of memory. Lower max tokens, disable chat history, or run Free VRAM from Settings."
-                ) from exc
-            raise RuntimeError(f"Generation failed: {exc}") from exc
+                if self._looks_like_oom(exc):
+                    self.cleanup_memory()
+                    raise RuntimeError(
+                        "Generation failed: out of memory. Lower max tokens, disable chat history, or run Free VRAM from Settings."
+                    ) from exc
+                raise RuntimeError(f"Generation failed: {exc}") from exc
+            finally:
+                if stop_backup is not None:
+                    self._config.stop = stop_backup
         finally:
-            if stop_backup is not None:
-                self._config.stop = stop_backup
+            self._generating = False
+            self._generation_lock.release()
 
     def run_ocr(self, image_path: str) -> str:
         if not self._impl or not self.is_ocr_backend():

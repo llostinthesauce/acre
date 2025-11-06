@@ -31,6 +31,19 @@ def _is_jetson() -> bool:
     return False
 
 
+def _is_arm64_linux() -> bool:
+    """Detect if running on ARM64 Linux (Jetson or other ARM64 systems)."""
+    try:
+        machine = platform.machine().lower()
+        system = platform.system().lower()
+        # ARM64 Linux systems (including Jetson) can't use PyPI PyTorch
+        if machine in ("aarch64", "arm64") and system == "linux":
+            return True
+    except Exception:
+        pass
+    return False
+
+
 def _need(mod: str) -> bool:
     try:
         return importlib.util.find_spec(mod) is None
@@ -42,14 +55,38 @@ def _ensure(pkgs: list[tuple[str, str]]) -> None:
     missing = [p for p in pkgs if _need(p[1])]
     if not missing:
         return
+    
+    # Block PyTorch installation on ARM64 Linux (Jetson or other ARM64 systems)
+    is_arm64_linux = _is_arm64_linux()
+    filtered_pkgs = []
+    for pkg_name, mod_name in missing:
+        # Skip torch and torchvision on ARM64 Linux - they need special builds
+        if is_arm64_linux and (pkg_name.startswith("torch") or mod_name == "torch"):
+            print(f"SKIPPING {pkg_name} on ARM64 Linux - PyPI wheels are not supported.")
+            print("  Please install PyTorch from NVIDIA's Jetson wheels or build from source.")
+            print("  See JETSON_SETUP.md for instructions.")
+            continue
+        filtered_pkgs.append((pkg_name, mod_name))
+    
+    if not filtered_pkgs:
+        return
+    
     try:
         subprocess.check_call(
             [sys.executable, "-m", "pip", "install", "-t", str(VENDOR)]
-            + [p[0] for p in missing]
+            + [p[0] for p in filtered_pkgs]
         )
     except Exception as exc:
-        names = ", ".join(p[0] for p in missing)
-        print(f"Failed to install {names}: {exc}")
+        names = ", ".join(p[0] for p in filtered_pkgs)
+        error_msg = str(exc)
+        # Provide helpful error message for PyTorch installation failures
+        if "torch" in names.lower() and ("linux" in error_msg.lower() or "arch" in error_msg.lower() or "wheel" in error_msg.lower()):
+            print(f"ERROR: Failed to install {names}")
+            print("  PyTorch from PyPI is not supported on ARM64 Linux systems.")
+            print("  On Jetson devices, install PyTorch from NVIDIA's pre-built wheels.")
+            print("  See JETSON_SETUP.md for detailed instructions.")
+        else:
+            print(f"Failed to install {names}: {exc}")
 
 
 def _requires_diffusers() -> bool:
@@ -115,6 +152,13 @@ def setup_environment() -> None:
         sys.path.insert(0, str(VENDOR))
     
     is_jetson = _is_jetson()
+    is_arm64_linux = _is_arm64_linux()
+    
+    # Warn if on ARM64 Linux but not detected as Jetson
+    if is_arm64_linux and not is_jetson:
+        print("WARNING: Detected ARM64 Linux system. PyTorch must be installed manually.")
+        print("  Standard PyPI PyTorch wheels are not available for ARM64 Linux.")
+        print("  See JETSON_SETUP.md for installation guidance.")
     
     base_packages = [
         ("customtkinter>=5.2.0", "customtkinter"),
@@ -129,9 +173,9 @@ def setup_environment() -> None:
     _ensure(base_packages)
     
     if _requires_transformers():
-        # On Jetson, PyTorch should be pre-installed via NVIDIA's method
+        # On ARM64 Linux (Jetson or other), PyTorch should be pre-installed
         # Don't install from PyPI as it won't work on ARM64
-        if not is_jetson:
+        if not is_arm64_linux:
             transformer_packages = [
                 ("torch>=2.3", "torch"),
                 ("torchvision>=0.18", "torchvision"),
@@ -139,15 +183,19 @@ def setup_environment() -> None:
             ]
             _ensure(transformer_packages)
         else:
-            # On Jetson, only install transformers if torch is already available
+            # On ARM64 Linux, only install transformers if torch is already available
             if not _need("torch"):
                 transformers_only = [
                     ("transformers>=4.52.4", "transformers"),
                 ]
                 _ensure(transformers_only)
             else:
-                print("WARNING: PyTorch not found on Jetson. Please install PyTorch for Jetson first.")
-                print("See JETSON_SETUP.md for instructions.")
+                print("WARNING: PyTorch not found on ARM64 Linux system.")
+                if is_jetson:
+                    print("  Please install PyTorch for Jetson from NVIDIA's wheels.")
+                else:
+                    print("  Please install PyTorch manually (PyPI wheels not available for ARM64 Linux).")
+                print("  See JETSON_SETUP.md for instructions.")
     
     if _requires_mlx():
         mlx_packages = [
@@ -158,8 +206,8 @@ def setup_environment() -> None:
     if not _requires_diffusers():
         return
     
-    # For diffusers, same logic - skip torch on Jetson
-    if not is_jetson:
+    # For diffusers, same logic - skip torch on ARM64 Linux
+    if not is_arm64_linux:
         diffusion_packages = [
             ("torch>=2.3", "torch"),
             ("transformers>=4.52.4", "transformers"),
@@ -170,7 +218,7 @@ def setup_environment() -> None:
         ]
         _ensure(diffusion_packages)
     else:
-        # On Jetson, install diffusers dependencies if torch is available
+        # On ARM64 Linux, install diffusers dependencies if torch is available
         if not _need("torch"):
             diffusion_packages = [
                 ("transformers>=4.52.4", "transformers"),
@@ -181,5 +229,9 @@ def setup_environment() -> None:
             ]
             _ensure(diffusion_packages)
         else:
-            print("WARNING: PyTorch not found on Jetson. Please install PyTorch for Jetson first.")
-            print("See JETSON_SETUP.md for instructions.")
+            print("WARNING: PyTorch not found on ARM64 Linux system.")
+            if is_jetson:
+                print("  Please install PyTorch for Jetson from NVIDIA's wheels.")
+            else:
+                print("  Please install PyTorch manually (PyPI wheels not available for ARM64 Linux).")
+            print("  See JETSON_SETUP.md for instructions.")

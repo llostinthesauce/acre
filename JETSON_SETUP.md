@@ -9,7 +9,27 @@ This guide will help you set up ACRE on an NVIDIA Jetson device.
 - Python 3.8 or higher
 - Internet connection for initial setup
 
-## Quick Setup
+## Quick Setup for Jetson Orin Nano (JetPack 6.2)
+
+**Complete automated installation:**
+```bash
+chmod +x install_jetson_orin_nano.sh
+./install_jetson_orin_nano.sh
+```
+
+This script will:
+- Install all system dependencies
+- Guide you through PyTorch installation
+- Install all Python packages
+- Set up llama-cpp-python with CUDA support
+
+**For PyTorch installation only:**
+```bash
+chmod +x install_pytorch_jp62.sh
+./install_pytorch_jp62.sh
+```
+
+## General Setup (Other Jetson Models)
 
 1. **Run the setup script:**
    ```bash

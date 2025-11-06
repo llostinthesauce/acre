@@ -7,8 +7,13 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import soundfile as sf
-import torch
 from PIL import Image
+
+# Optional torch import - only needed for transformers/vision backends
+try:
+    import torch
+except ImportError:
+    torch = None  # type: ignore[assignment]
 
 from .config import GenerationConfig
 
@@ -116,6 +121,8 @@ class LlamaCppBackend(BaseBackend):
 
 class HFBackend(BaseBackend):
     def __init__(self, model_dir: Path, device_pref: str):
+        if torch is None:
+            raise RuntimeError("PyTorch (torch) is required for transformers backends. Please install PyTorch for Jetson.")
         try:
             from transformers import AutoModelForCausalLM, AutoTokenizer
         except Exception:
@@ -483,6 +490,8 @@ class HFBackend(BaseBackend):
 
 class AutoGPTQBackend(BaseBackend):
     def __init__(self, model_dir: Path, device_pref: str):
+        if torch is None:
+            raise RuntimeError("PyTorch (torch) is required for AutoGPTQ backends. Please install PyTorch for Jetson.")
         try:
             from auto_gptq import AutoGPTQForCausalLM
             from transformers import AutoTokenizer
@@ -616,6 +625,8 @@ class MLXBackend(BaseBackend):
 
 class PhiVisionBackend(BaseBackend):
     def __init__(self, model_dir: Path, device_pref: str):
+        if torch is None:
+            raise RuntimeError("PyTorch (torch) is required for vision models. Please install PyTorch for Jetson.")
         try:
             from transformers import AutoConfig, AutoModelForCausalLM, AutoProcessor
         except Exception:
@@ -761,6 +772,8 @@ class PhiVisionBackend(BaseBackend):
 
 class DiffusersT2IBackend(BaseBackend):
     def __init__(self, model_dir: Path, device_pref: str):
+        if torch is None:
+            raise RuntimeError("PyTorch (torch) is required for diffusers backends. Please install PyTorch for Jetson.")
         try:
             from diffusers import AutoPipelineForText2Image
         except Exception:
@@ -839,6 +852,8 @@ class DiffusersT2IBackend(BaseBackend):
 
 class OCRBackend(BaseBackend):
     def __init__(self, model_dir: Path, device_pref: str):
+        if torch is None:
+            raise RuntimeError("PyTorch (torch) is required for OCR backends. Please install PyTorch for Jetson.")
         try:
             from transformers import pipeline
         except Exception:
@@ -871,6 +886,8 @@ class OCRBackend(BaseBackend):
 
 class ASRBackend(BaseBackend):
     def __init__(self, model_dir: Path, device_pref: str):
+        if torch is None:
+            raise RuntimeError("PyTorch (torch) is required for ASR backends. Please install PyTorch for Jetson.")
         try:
             from transformers import pipeline
         except Exception:
@@ -901,6 +918,8 @@ class ASRBackend(BaseBackend):
 
 class TTSBackend(BaseBackend):
     def __init__(self, model_dir: Path, device_pref: str):
+        if torch is None:
+            raise RuntimeError("PyTorch (torch) is required for TTS backends. Please install PyTorch for Jetson.")
         try:
             from transformers import pipeline
         except Exception:

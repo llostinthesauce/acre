@@ -11,12 +11,18 @@
       "iterations": 200000,
       "enc_salt": "33m359dfW-HMXLWSIX8-Bw",
       "enc_iterations": 200000,
-      "disclaimer_ack": true,
-      "remember_key": "WlEyczhJdU00ZTQ5bmVNZTh5OXpmU1pCTW5sTzlLNHUyNm9vQ0c1MmZPRT0",
-      "remember_expires": 1764808701.0985742
+      "disclaimer_ack": true
+    },
+    "test": {
+      "password_hash": "1V1e_SYc18eNqeckHlmiNcyp1nadMw-yAucy0EVfwKg",
+      "salt": "ZiawvfEIGju2_V86gEb3aw",
+      "iterations": 200000,
+      "enc_salt": "64XHEmUbwZO1wor8OLL85Q",
+      "enc_iterations": 200000,
+      "disclaimer_ack": true
     }
   },
-  "active_user": "toby",
+  "active_user": "test",
   "prefs": {
     "text_temperature": 0.44999999999999996,
     "text_max_tokens": 1024,

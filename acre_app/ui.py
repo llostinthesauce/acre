@@ -47,6 +47,7 @@ from .constants import (
 )
 from .gallery import ensure_user_dirs, refresh_gallery
 from .models import add_model, pick_model, refresh_list, rename_model
+from .training import open_training_dialog
 from .prompt import run_prompt
 from .settings import (
     clear_remember_me,
@@ -663,6 +664,12 @@ def build_main_ui() -> None:
     ).pack(**button_kwargs)
     ctk.CTkButton(
         gs.side_frame,
+        text="Train Model",
+        command=open_training_dialog,
+        **primary_button,
+    ).pack(**button_kwargs)
+    ctk.CTkButton(
+        gs.side_frame,
         text="Clear History",
         command=clear_chat,
         corner_radius=BUTTON_RADIUS,
@@ -1231,10 +1238,23 @@ def build_gate_ui() -> None:
             ensure_encryption_metadata(settings_local, user)
         gs.current_user = user
         gs.pending_user = None
-        Path("models").mkdir(parents=True, exist_ok=True)
-        Path("history").mkdir(parents=True, exist_ok=True)
-        Path("outputs").mkdir(parents=True, exist_ok=True)
-        ensure_user_dirs()
+        try:
+            Path("models").mkdir(parents=True, exist_ok=True)
+            Path("history").mkdir(parents=True, exist_ok=True)
+            Path("outputs").mkdir(parents=True, exist_ok=True)
+            ensure_user_dirs()
+        except PermissionError:
+            messagebox.showerror(
+                "Permission Denied",
+                "Unable to create required directories. Please check file permissions."
+            )
+            return
+        except Exception as e:
+            messagebox.showerror(
+                "Error",
+                f"Failed to create directories: {e}"
+            )
+            return
         try:
             if gs.gate_frame:
                 gs.gate_frame.destroy()
@@ -1350,7 +1370,44 @@ def on_close() -> None:
         gs.root.destroy()
 
 
+def _check_display_server() -> tuple[bool, Optional[str]]:
+    import os
+    import sys
+    import subprocess
+    
+    if sys.platform == "darwin" or sys.platform == "win32":
+        return True, None
+    
+    display = os.environ.get("DISPLAY")
+    if not display:
+        return False, "DISPLAY environment variable is not set. GUI requires X11 display server."
+    
+    try:
+        result = subprocess.run(
+            ["xdpyinfo"],
+            capture_output=True,
+            timeout=2,
+            stderr=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL
+        )
+        if result.returncode != 0:
+            return False, "X server is not accessible. Please start X server or use Xvfb for headless mode."
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        pass
+    
+    return True, None
+
+
 def run_app() -> None:
+    display_ok, display_error = _check_display_server()
+    if not display_ok:
+        import sys
+        print(f"ERROR: {display_error}", file=sys.stderr)
+        print("TIP: For headless Linux systems, use Xvfb:", file=sys.stderr)
+        print("  Xvfb :99 -screen 0 1024x768x24 &", file=sys.stderr)
+        print("  export DISPLAY=:99", file=sys.stderr)
+        sys.exit(1)
+    
     prefs = get_prefs()
     ctk.set_appearance_mode("dark")
     ctk.set_default_color_theme("blue")

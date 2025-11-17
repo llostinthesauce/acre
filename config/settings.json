@@ -12,9 +12,17 @@
       "enc_salt": "33m359dfW-HMXLWSIX8-Bw",
       "enc_iterations": 200000,
       "disclaimer_ack": true
+    },
+    "emma": {
+      "password_hash": "5JTITzYkYRa6EQKjnaVEcvYdkCWtUlNaGlBWXfYr3ZE",
+      "salt": "RkTNE4Lpht5zrnL2d2Vpww",
+      "iterations": 200000,
+      "enc_salt": "5CSFMOMD8mA8lyfHOzI-Sg",
+      "enc_iterations": 200000,
+      "disclaimer_ack": true
     }
   },
-  "active_user": "toby",
+  "active_user": "emma",
   "prefs": {
     "text_temperature": 0.74,
     "text_max_tokens": 1024,
@@ -25,7 +33,8 @@
     "image_seed": null,
     "ui_scale": 0.91,
     "device_preference": "auto",
-    "history_enabled": true
+    "history_enabled": true,
+    "theme": "Blue"
   },
   "per_user": {}
 }

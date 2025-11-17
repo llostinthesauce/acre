@@ -26,7 +26,6 @@ def run_prompt() -> None:
     if not gs.mgr or not gs.mgr.is_loaded():
         update_status("Load a model before sending a prompt.")
         return
-    # Check if generation is already in progress
     if hasattr(gs.mgr, "_generating") and gs.mgr._generating:
         update_status("Generation in progress. Please wait...")
         return
@@ -68,7 +67,6 @@ def run_prompt() -> None:
             try:
                 gs.mgr.generate(prompt_text)
             except RuntimeError as exc:
-                # Handle concurrent generation attempts gracefully
                 if "already in progress" in str(exc):
                     error = "Please wait for the current generation to complete before sending another query."
                 else:

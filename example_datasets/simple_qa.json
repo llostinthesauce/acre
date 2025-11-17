@@ -1,0 +1,65 @@
+[
+  {
+    "instruction": "What is Python?",
+    "response": "Python is a high-level programming language known for its simplicity and readability. It's widely used for web development, data science, AI, and automation."
+  },
+  {
+    "instruction": "How do I create a list in Python?",
+    "response": "You can create a list in Python using square brackets: my_list = [1, 2, 3] or my_list = [] for an empty list."
+  },
+  {
+    "instruction": "What is a function?",
+    "response": "A function is a reusable block of code that performs a specific task. In Python, you define functions with the 'def' keyword: def my_function(): pass"
+  },
+  {
+    "instruction": "Explain variables in Python",
+    "response": "Variables in Python are containers for storing data values. You don't need to declare the type - Python automatically determines it. Example: x = 5, name = 'Alice'"
+  },
+  {
+    "instruction": "What are Python libraries?",
+    "response": "Python libraries are collections of pre-written code that you can import and use. Popular examples include NumPy for math, Pandas for data analysis, and TensorFlow for machine learning."
+  },
+  {
+    "instruction": "How do I read a file in Python?",
+    "response": "You can read a file using: with open('file.txt', 'r') as f: content = f.read(). This automatically closes the file when done."
+  },
+  {
+    "instruction": "What is a dictionary in Python?",
+    "response": "A dictionary is a collection of key-value pairs. Example: my_dict = {'name': 'Alice', 'age': 30}. Access values with my_dict['name'] or my_dict.get('name')."
+  },
+  {
+    "instruction": "How do I iterate over a list?",
+    "response": "You can iterate with a for loop: for item in my_list: print(item). Or with index: for i in range(len(my_list)): print(my_list[i])"
+  },
+  {
+    "instruction": "What is list comprehension?",
+    "response": "List comprehension is a concise way to create lists: squares = [x**2 for x in range(10)] creates a list of squares from 0 to 81."
+  },
+  {
+    "instruction": "How do I handle errors in Python?",
+    "response": "Use try-except blocks: try: risky_code() except Exception as e: print(f'Error: {e}'). This catches and handles errors gracefully."
+  },
+  {
+    "instruction": "What is a class in Python?",
+    "response": "A class is a blueprint for creating objects. It defines attributes and methods. Example: class Dog: def __init__(self, name): self.name = name"
+  },
+  {
+    "instruction": "Explain Python modules",
+    "response": "A module is a file containing Python code (functions, classes, variables). You import modules with 'import module_name' and use their contents with 'module_name.function()'"
+  },
+  {
+    "instruction": "What is pip?",
+    "response": "pip is Python's package installer. Use it to install libraries: pip install package_name. It downloads and installs packages from PyPI (Python Package Index)."
+  },
+  {
+    "instruction": "How do I create a virtual environment?",
+    "response": "Create a virtual environment with: python -m venv venv_name. Activate it with: source venv_name/bin/activate (Mac/Linux) or venv_name\\Scripts\\activate (Windows)."
+  },
+  {
+    "instruction": "What is the difference between a list and a tuple?",
+    "response": "Lists are mutable (can be changed) and use square brackets []. Tuples are immutable (cannot be changed) and use parentheses (). Lists: [1, 2, 3], Tuples: (1, 2, 3)."
+  }
+]
+
+
+

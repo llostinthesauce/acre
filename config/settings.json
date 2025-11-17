@@ -16,7 +16,7 @@
   },
   "active_user": "toby",
   "prefs": {
-    "text_temperature": 0.44999999999999996,
+    "text_temperature": 0.74,
     "text_max_tokens": 1024,
     "image_width": 512,
     "image_height": 512,

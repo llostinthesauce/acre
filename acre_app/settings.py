@@ -96,6 +96,7 @@ def get_prefs() -> dict:
         "ui_scale": float(prefs.get("ui_scale", 1.15)),
         "device_preference": str(prefs.get("device_preference", "auto")).lower(),
         "history_enabled": bool(prefs.get("history_enabled", True)),
+        "theme": str(prefs.get("theme", "Blue")),
     }
 
 

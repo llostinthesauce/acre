@@ -1,4 +1,5 @@
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -20,11 +21,16 @@ def to_float(val, default):
 
 
 def open_path(path: Path) -> None:
-    resolved = path.resolve()
-    if sys.platform == "darwin":
-        os.system(f'open "{resolved}"')
-        return
-    if os.name == "nt":
-        os.startfile(str(resolved))
-        return
-    os.system(f'xdg-open "{resolved}"')
+    try:
+        resolved = path.resolve()
+        if not resolved.exists():
+            return
+        
+        if sys.platform == "darwin":
+            subprocess.run(["open", str(resolved)], check=False)
+        elif os.name == "nt":
+            os.startfile(str(resolved))
+        else:
+            subprocess.run(["xdg-open", str(resolved)], check=False)
+    except Exception:
+        pass

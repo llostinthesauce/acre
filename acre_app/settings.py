@@ -16,10 +16,29 @@ def load_settings() -> dict:
 
 
 def save_settings(data: dict) -> None:
-    CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    temp = CONFIG_PATH.with_suffix(".json.tmp")
-    temp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    temp.replace(CONFIG_PATH)
+    import time
+    max_retries = 3
+    retry_delay = 0.1
+    
+    for attempt in range(max_retries):
+        try:
+            CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+            temp = CONFIG_PATH.with_suffix(".json.tmp")
+            temp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+            temp.replace(CONFIG_PATH)
+            return
+        except PermissionError:
+            if attempt < max_retries - 1:
+                time.sleep(retry_delay)
+                retry_delay *= 2
+            else:
+                raise
+        except OSError as e:
+            if attempt < max_retries - 1:
+                time.sleep(retry_delay)
+                retry_delay *= 2
+            else:
+                raise
 
 
 def encode_b64(value: bytes) -> str:

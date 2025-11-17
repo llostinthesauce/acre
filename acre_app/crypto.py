@@ -22,7 +22,6 @@ def derive_fernet_key(password: str, *, salt_b64: str, iterations: int = 200_000
 
 @dataclass
 class ChatEncryptor:
-    """Thin wrapper around Fernet encryption for chat history blobs."""
 
     key: bytes
 

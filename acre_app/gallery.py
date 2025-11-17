@@ -28,16 +28,33 @@ from .ui_helpers import update_status
 def ensure_user_dirs() -> None:
     if not gs.current_user:
         return
-    (Path("history") / gs.current_user).mkdir(parents=True, exist_ok=True)
-    (OUTPUTS_PATH / gs.current_user).mkdir(parents=True, exist_ok=True)
-    (OUTPUTS_PATH / gs.current_user / ".thumbnails").mkdir(parents=True, exist_ok=True)
+    try:
+        (Path("history") / gs.current_user).mkdir(parents=True, exist_ok=True)
+        (OUTPUTS_PATH / gs.current_user).mkdir(parents=True, exist_ok=True)
+        (OUTPUTS_PATH / gs.current_user / ".thumbnails").mkdir(parents=True, exist_ok=True)
+    except PermissionError:
+        from tkinter import messagebox
+        messagebox.showerror(
+            "Permission Denied",
+            f"Unable to create user directories for {gs.current_user}. Please check file permissions."
+        )
+    except OSError as e:
+        from tkinter import messagebox
+        messagebox.showerror(
+            "Error",
+            f"Failed to create user directories: {e}"
+        )
 
 
 def _thumb_path(path: Path) -> Path:
     base = OUTPUTS_PATH / (gs.current_user or "")
     root = base / ".thumbnails" if gs.current_user else OUTPUTS_PATH / ".thumbnails"
-    root.mkdir(parents=True, exist_ok=True)
-    return root / f"{path.stem}_256.png"
+    try:
+        root.mkdir(parents=True, exist_ok=True)
+    except (PermissionError, OSError):
+        pass
+    safe_name = path.stem.replace("/", "_").replace("\\", "_")[:100]
+    return root / f"{safe_name}_256.png"
 
 
 def _make_thumbnail(path: Path) -> Path:

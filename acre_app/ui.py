@@ -1312,8 +1312,13 @@ def build_gate_ui() -> None:
         font=FONT_UI,
     )
     remember_box.grid(row=2, column=0, columnspan=2, padx=8, pady=(0, 4), sticky="w")
+
+    def _focus_login_password() -> None:
+        if password_entry.winfo_exists():
+            password_entry.focus_force()
+
     if gs.root:
-        gs.root.after(100, lambda: password_entry.focus_force())
+        gs.root.after(100, _focus_login_password)
 
     def handle_login() -> None:
         settings_local = load_settings()

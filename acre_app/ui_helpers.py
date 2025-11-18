@@ -1,8 +1,18 @@
+import tkinter as tk
 import tkinter.font as tkfont
 
 from . import global_state as gs
-from .constants import BASE_UI, FONT_FAMILY
-
+from .constants import (
+    BASE_UI,
+    FONT_FAMILY,
+    BG_GRAD_TOP,
+    BG_LIST,
+    HL_LIST,
+    TEXT,
+    MUTED,
+    CONTROL_BG,
+    SURFACE_PRIMARY,
+)
 
 def apply_native_font_scale(scale: float) -> None:
     size = max(10, int(BASE_UI * scale))
@@ -61,5 +71,68 @@ def update_logo_visibility() -> None:
         else:
             gs.logo_label.place(relx=0.5, rely=0.4, anchor="center")
             gs.logo_label.lift()
+    except Exception:
+        pass
+
+def _safe_config(widget, **kwargs):
+    if widget is None:
+        return
+    try:
+        widget.configure(**kwargs)
+    except Exception:
+        pass
+
+
+def recolor_whole_app(root: tk.Misc):
+    """
+    Re-apply theme colors to the few plain Tk widgets we use.
+    Leave CustomTkinter widgets alone so CTk handles its own styling.
+    """
+    if root is None:
+        return
+
+    try:
+        try:
+            root.configure(fg_color=BG_GRAD_TOP)
+        except Exception:
+            root.configure(bg=BG_GRAD_TOP)
+    except Exception:
+        pass
+
+    if gs.listbox is not None:
+        try:
+            gs.listbox.configure(
+                bg=BG_LIST,
+                fg=TEXT,
+                selectbackground=HL_LIST,
+                selectforeground=TEXT,
+                highlightthickness=0,
+                bd=0,
+                relief="flat",
+            )
+        except Exception:
+            pass
+
+    if gs.entry is not None:
+        try:
+            gs.entry.configure(
+                bg=CONTROL_BG,
+                fg=MUTED,
+                insertbackground=TEXT,
+                highlightthickness=0,
+                bd=0,
+                relief="flat",
+            )
+        except Exception:
+            pass
+
+    if gs.logo_label is not None:
+        try:
+            gs.logo_label.configure(bg=SURFACE_PRIMARY)
+        except Exception:
+            pass
+
+    try:
+        root.update_idletasks()
     except Exception:
         pass

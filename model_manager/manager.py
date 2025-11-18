@@ -5,6 +5,8 @@ import re
 import threading
 from pathlib import Path
 from typing import Any, List, Optional, Tuple
+from platform_utils import is_jetson
+
 from .backends import ASRBackend, AutoGPTQBackend, BaseBackend, DiffusersT2IBackend, HFBackend, LlamaCppBackend, MLXBackend, OCRBackend, PhiVisionBackend, TTSBackend
 from .config import GenerationConfig
 
@@ -84,58 +86,53 @@ class ModelManager:
                 return -1
         except Exception:
             pass
-        if Path('/etc/nv_tegra_release').exists():
+        if is_jetson():
             return -1
         return 0
-
-    def _is_jetson(self) -> bool:
+    def _detect_directory_backend(self, directory: Path) -> Optional[Tuple[str, Path, str]]:
+        first_gguf = next(
+            (f for f in sorted(directory.iterdir())
+             if f.is_file() and f.suffix.lower() in self.SUPPORTED_EXTENSIONS),
+            None,
+        )
+        if first_gguf:
+            return ('llama_cpp', first_gguf, 'text')
+        if (directory / 'model_index.json').exists():
+            return ('diffusers_t2i', directory, 'image')
+        if (directory / 'quantize_config.json').exists():
+            return ('auto_gptq', directory, 'text')
+        config_path = directory / 'config.json'
+        if not config_path.exists():
+            return None
         try:
-            from pathlib import Path
-            if Path('/etc/nv_tegra_release').exists():
-                return True
+            config = json.loads(config_path.read_text())
         except Exception:
-            pass
-        return False
+            config = {}
+        model_type = str(config.get('model_type', '')).lower()
+        architectures = [a.lower() for a in config.get('architectures', [])]
+        name_lower = directory.name.lower()
+        quant_info = str(config.get('quantization_config', {})).lower()
+        if 'mlx' in name_lower or 'mlx' in quant_info:
+            if is_jetson():
+                raise ValueError('MLX models are not supported on Jetson. Use GGUF or Transformers models.')
+            return ('mlx_lm', directory, 'text')
+        if 'phi' in name_lower and 'vision' in name_lower:
+            return ('phi_vision', directory, 'vision')
+        if 'vision' in model_type or 'trocr' in model_type or any('vision' in arch for arch in architectures):
+            return ('ocr_trocr', directory, 'ocr')
+        if 'whisper' in model_type or any('whisper' in arch for arch in architectures):
+            return ('asr_whisper', directory, 'asr')
+        if 'tts' in model_type or 'speech' in model_type or any('tts' in arch for arch in architectures):
+            return ('tts_transformers', directory, 'tts')
+        return ('transformers', directory, 'text')
 
     def _detect_backend(self, candidate: Path) -> Tuple[str, Path, str]:
-        if candidate.is_file() and candidate.suffix.lower() in {'.gguf', '.ggml'}:
+        if candidate.is_file() and candidate.suffix.lower() in self.SUPPORTED_EXTENSIONS:
             return ('llama_cpp', candidate, 'text')
-        
         if candidate.is_dir():
-            gguf_files = [f for f in candidate.iterdir() if f.is_file() and f.suffix.lower() in {'.gguf', '.ggml'}]
-            if gguf_files:
-                return ('llama_cpp', sorted(gguf_files)[0], 'text')
-            
-            if (candidate / 'model_index.json').exists():
-                return ('diffusers_t2i', candidate, 'image')
-            if (candidate / 'quantize_config.json').exists():
-                return ('auto_gptq', candidate, 'text')
-            if (candidate / 'config.json').exists():
-                try:
-                    config = json.loads((candidate / 'config.json').read_text())
-                except Exception:
-                    config = {}
-                
-                model_type = str(config.get('model_type', '')).lower()
-                architectures = [a.lower() for a in config.get('architectures', [])]
-                name_lower = candidate.name.lower()
-                
-                if 'mlx' in name_lower or 'mlx' in str(config.get('quantization_config', {})).lower():
-                    if self._is_jetson():
-                        raise ValueError('MLX models are not supported on Jetson. Use GGUF or Transformers models.')
-                    return ('mlx_lm', candidate, 'text')
-                
-                if 'phi' in name_lower and 'vision' in name_lower:
-                    return ('phi_vision', candidate, 'vision')
-                if 'vision' in model_type or 'trocr' in model_type or any('vision' in a for a in architectures):
-                    return ('ocr_trocr', candidate, 'ocr')
-                if 'whisper' in model_type or any('whisper' in a for a in architectures):
-                    return ('asr_whisper', candidate, 'asr')
-                if 'tts' in model_type or 'speech' in model_type or any('tts' in a for a in architectures):
-                    return ('tts_transformers', candidate, 'tts')
-                
-                return ('transformers', candidate, 'text')
-        
+            backend = self._detect_directory_backend(candidate)
+            if backend:
+                return backend
         raise ValueError(f'Unsupported model: {candidate}')
 
     def load_model(self, name: str, *, device_pref: Optional[str]=None) -> Tuple[bool, str]:

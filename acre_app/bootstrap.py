@@ -118,6 +118,14 @@ def setup_environment() -> None:
     if str(VENDOR) not in sys.path:
         # Keep vendor at the end so system/site-packages versions win (avoids stale vendored wheels).
         sys.path.append(str(VENDOR))
+
+    # Guard against numpy>=2 removing legacy aliases (e.g., Inf) used by some deps.
+    try:
+        import numpy as _np
+        if not hasattr(_np, "Inf"):
+            _np.Inf = _np.inf  # type: ignore[attr-defined]
+    except Exception:
+        pass
     
     on_jetson = is_jetson()
     arm64_linux = is_arm64_linux()

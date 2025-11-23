@@ -1535,27 +1535,51 @@ def _check_display_server() -> tuple[bool, Optional[str]]:
     import os
     import sys
     import subprocess
-    
+    import shutil
+
     if sys.platform == "darwin" or sys.platform == "win32":
         return True, None
-    
-    display = os.environ.get("DISPLAY")
-    if not display:
-        return False, "DISPLAY environment variable is not set. GUI requires X11 display server."
-    
-    try:
-        result = subprocess.run(
-            ["xdpyinfo"],
-            timeout=2,
-            stderr=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL
-        )
-        if result.returncode != 0:
-            return False, "X server is not accessible. Please start X server or use Xvfb for headless mode."
-    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
-        pass
-    
-    return True, None
+
+    def _display_is_available() -> bool:
+        try:
+            result = subprocess.run(
+                ["xdpyinfo"],
+                timeout=2,
+                stderr=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+            )
+            return result.returncode == 0
+        except subprocess.TimeoutExpired:
+            return False
+        except (FileNotFoundError, OSError):
+            # If xdpyinfo is missing we assume the display might still be fine.
+            return True
+
+    if os.environ.get("DISPLAY") and _display_is_available():
+        return True, None
+
+    xvfb_path = shutil.which("Xvfb")
+    if xvfb_path:
+        target_display = ":99"
+        try:
+            subprocess.Popen(
+                [xvfb_path, target_display, "-screen", "0", "1024x768x24"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            time.sleep(0.3)
+            os.environ["DISPLAY"] = target_display
+        except OSError as exc:
+            return False, f"Failed to start Xvfb automatically: {exc}. GUI requires X11 display server."
+
+        if _display_is_available():
+            return True, None
+        return False, "Attempted to start Xvfb automatically, but X server is still not accessible."
+
+    if not os.environ.get("DISPLAY"):
+        return False, "DISPLAY environment variable is not set and Xvfb is not installed. GUI requires X11 display server."
+
+    return False, "X server is not accessible. Please start X server or install Xvfb for headless mode."
 
 
 def run_app() -> None:

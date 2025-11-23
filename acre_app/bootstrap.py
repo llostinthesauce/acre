@@ -116,7 +116,8 @@ def setup_environment() -> None:
     os.environ.setdefault("FLASH_ATTENTION_FORCE_DISABLE", "1")
     VENDOR.mkdir(exist_ok=True)
     if str(VENDOR) not in sys.path:
-        sys.path.insert(0, str(VENDOR))
+        # Keep vendor at the end so system/site-packages versions win (avoids stale vendored wheels).
+        sys.path.append(str(VENDOR))
     
     on_jetson = is_jetson()
     arm64_linux = is_arm64_linux()

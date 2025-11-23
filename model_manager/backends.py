@@ -310,10 +310,10 @@ class HFBackend(BaseBackend):
             if value.startswith('transformers_modules.'):
                 return True
             module_name = value.split('.')[0]
-            candidate = model_dir / f'{module_name.replace('.', '/')}.py'
+            candidate = model_dir / f"{module_name.replace('.', '/')}.py"
             if candidate.exists():
                 return True
-            candidate = model_dir / 'src' / f'{module_name.replace('.', '/')}.py'
+            candidate = model_dir / 'src' / f"{module_name.replace('.', '/')}.py"
             if candidate.exists():
                 return True
             return False

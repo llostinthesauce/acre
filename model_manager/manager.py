@@ -343,7 +343,7 @@ class ModelManager:
     def describe_session(self) -> str:
         if not self._impl or not self._current_model_name:
             return 'No model loaded.'
-        details = [f'Model: {self._current_model_name}', f'Backend: {self._backend or 'unknown'}']
+        details = [f"Model: {self._current_model_name}", f"Backend: {self._backend or 'unknown'}"]
         inspector = getattr(self._impl, 'runtime_info', None)
         runtime: dict[str, Any] = {}
         if callable(inspector):
@@ -361,7 +361,7 @@ class ModelManager:
             details.append(f'Context limit: {context} tokens')
         details.append(f'Max tokens: {self._config.max_tokens}')
         details.append(f'Temperature: {self._config.temperature}')
-        details.append(f'History: {('on' if self._history_enabled else 'off')}')
+        details.append(f"History: {'on' if self._history_enabled else 'off'}")
         return '\n'.join(details)
 
     def _looks_like_oom(self, exc: Exception) -> bool:

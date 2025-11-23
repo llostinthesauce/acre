@@ -1546,7 +1546,6 @@ def _check_display_server() -> tuple[bool, Optional[str]]:
     try:
         result = subprocess.run(
             ["xdpyinfo"],
-            capture_output=True,
             timeout=2,
             stderr=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL

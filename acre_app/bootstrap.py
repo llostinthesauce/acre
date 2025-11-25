@@ -129,7 +129,6 @@ def setup_environment() -> None:
     
     on_jetson = is_jetson()
     arm64_linux = is_arm64_linux()
-    
     if arm64_linux and not on_jetson:
         print("WARNING: Detected ARM64 Linux system. PyTorch must be installed manually.")
         print("  Standard PyPI PyTorch wheels are not available for ARM64 Linux.")

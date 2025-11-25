@@ -34,7 +34,7 @@
     "image_guidance": 2.8999999999999995,
     "image_seed": null,
     "ui_scale": 0.91,
-    "device_preference": "auto",
+    "device_preference": "cuda",
     "history_enabled": true,
     "theme": "Green"
   },

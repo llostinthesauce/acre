@@ -61,8 +61,8 @@ def _create_demo_dataset() -> List[Dict[str, str]]:
 
 
 JETSON_TRAINING_CONFIG = BASE_DIR / "config" / "jetson_training.json"
-JETSON_TRAINING_DOC = BASE_DIR / "docs" / "jetson_training.md"
-JETSON_DOC_REFERENCE = "docs/jetson_training.md"
+JETSON_TRAINING_DOC = BASE_DIR / "jetson" / "README.md"
+JETSON_DOC_REFERENCE = "jetson/README.md"
 
 
 @lru_cache(maxsize=1)

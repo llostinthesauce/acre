@@ -5,15 +5,20 @@ __pycache__/
 *.pyd
 *.so
 
+.DS_Store
+
 # Virtual environment
 .venv/
 venv/
+venv
+
 
 # local deps
 vendor/
 outputs/
 history/
 downloads/
+jetson/llama.cpp/
 
 # macOS junk
 .DS_Store

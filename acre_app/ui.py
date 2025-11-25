@@ -50,7 +50,7 @@ from .constants import (
     CONFIG_PATH,
 )
 from .gallery import ensure_user_dirs, refresh_gallery
-from .models import add_model, link_model_folder, pick_model, refresh_list, rename_model
+from .models import add_model, pick_model, refresh_list, rename_model
 from .training import open_training_dialog
 from .prompt import run_prompt
 from .settings import (
@@ -805,12 +805,6 @@ def build_main_ui() -> None:
         gs.side_frame,
         text="Add Model",
         command=add_model,
-        **primary_button,
-    ).pack(**button_kwargs)
-    ctk.CTkButton(
-        gs.side_frame,
-        text="Link Model Folder",
-        command=link_model_folder,
         **primary_button,
     ).pack(**button_kwargs)
     ctk.CTkButton(

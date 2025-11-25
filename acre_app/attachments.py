@@ -74,6 +74,7 @@ def refresh_attach_row() -> None:
             font=FONT_UI,
             text_color=TEXT,
         ).pack(side="left", padx=12, pady=10)
+        _build_button(gs.attach_row, "Analyze Document…", analyze_document)
         _build_button(gs.attach_row, "Analyze Image…", analyze_image)
     elif gs.mgr.is_image_backend():
         ctk.CTkLabel(
@@ -85,12 +86,12 @@ def refresh_attach_row() -> None:
     else:
         ctk.CTkLabel(
             gs.attach_row,
-            text="Attachments:",
+            text="Multimodal unavailable for this model. Load a vision-capable model to analyze images or documents.",
             font=FONT_UI,
-            text_color=TEXT,
-        ).pack(side="left", padx=(12, 6), pady=10)
-        _build_button(gs.attach_row, "Analyze Document…", analyze_document)
-        _build_button(gs.attach_row, "Analyze Image…", analyze_image)
+            text_color=MUTED,
+            wraplength=480,
+            justify="left",
+        ).pack(side="left", padx=12, pady=10)
 
 
 def do_ocr() -> None:
@@ -146,8 +147,11 @@ def do_asr() -> None:
 
 
 def analyze_document() -> None:
-    if not gs.mgr or not gs.mgr.is_loaded() or gs.mgr.is_image_backend():
-        update_status("Load a text model to analyze documents.")
+    if not gs.mgr or not gs.mgr.is_loaded():
+        update_status("Load a compatible model first.")
+        return
+    if not hasattr(gs.mgr, "is_vision_backend") or not gs.mgr.is_vision_backend():
+        update_status("Load a vision-capable model to analyze documents.")
         return
     path = filedialog.askopenfilename(
         title="Choose document",

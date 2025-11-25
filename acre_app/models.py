@@ -112,6 +112,28 @@ def add_model() -> None:
     update_status(f"Added model file: {destination.name}")
 
 
+def link_model_folder() -> None:
+    MODELS_PATH.mkdir(parents=True, exist_ok=True)
+    directory = filedialog.askdirectory(title="Link an existing model folder")
+    if not directory:
+        return
+    source = Path(directory)
+    if not source.exists() or not source.is_dir():
+        update_status("Invalid folder.")
+        return
+    destination = MODELS_PATH / source.name
+    if destination.exists():
+        messagebox.showerror("Already Exists", f"{destination} already exists.")
+        return
+    try:
+        destination.symlink_to(source.resolve(), target_is_directory=True)
+    except Exception as exc:
+        update_status(f"Failed to link folder: {exc}")
+        return
+    refresh_list()
+    update_status(f"Linked model folder: {destination.name}")
+
+
 def rename_model() -> None:
     if not gs.listbox:
         return

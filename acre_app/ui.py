@@ -293,17 +293,25 @@ def _make_settings_card(parent: ctk.CTkFrame, title: str, blurb: str) -> ctk.CTk
 def render_settings_tab(tab) -> None:
     if tab is None:
         return
+
     for widget in tab.winfo_children():
         widget.destroy()
+
     prefs = get_prefs()
+
     scroll = ctk.CTkScrollableFrame(tab, fg_color="transparent")
     scroll.pack(fill="both", expand=True, padx=12, pady=12)
+
     ctk.CTkLabel(
         scroll, text="Settings", font=FONT_H1, text_color=TEXT
     ).pack(anchor="w", padx=4, pady=(4, 2))
+
     ctk.CTkLabel(
         scroll,
-        text="Tune how ACRE behaves. Each section explains what the controls do so you can make changes with confidence.",
+        text=(
+            "Tune how ACRE behaves. Each section explains what the controls do "
+            "so you can make changes with confidence."
+        ),
         font=FONT_UI,
         text_color=MUTED,
         wraplength=560,
@@ -313,16 +321,13 @@ def render_settings_tab(tab) -> None:
     appearance_body = _make_settings_card(
         scroll,
         "Appearance",
-        "Pick a color theme. All colors update immediately and your choice is saved.",
+        "Pick a color theme and text size. Changes apply immediately and are saved for next time.",
     )
 
     current_theme = prefs.get("theme", "Blue")
     theme_var = tk.StringVar(value=current_theme)
 
-    current_theme = get_prefs().get("theme", "Blue")
-    theme_var = tk.StringVar(value=current_theme)
-
-    def on_theme_change(choice: str):
+    def on_theme_change(choice: str) -> None:
         try:
             set_prefs({"theme": choice})
         except Exception:
@@ -332,13 +337,15 @@ def render_settings_tab(tab) -> None:
             recolor_whole_app(gs.root)
         update_status(f"Theme set to {choice}")
 
-    row = ctk.CTkFrame(appearance_body, fg_color="transparent")
-    row.pack(fill="x", pady=(0, 6))
+    theme_row = ctk.CTkFrame(appearance_body, fg_color="transparent")
+    theme_row.pack(fill="x", pady=(0, 6))
 
-    ctk.CTkLabel(row, text="Theme", font=FONT_UI).grid(row=0, column=0, padx=(0, 8), sticky="w")
+    ctk.CTkLabel(theme_row, text="Theme", font=FONT_UI).grid(
+        row=0, column=0, padx=(0, 8), sticky="w"
+    )
 
     ctk.CTkOptionMenu(
-        row,
+        theme_row,
         values=list(THEMES.keys()),
         variable=theme_var,
         font=FONT_UI,
@@ -348,12 +355,40 @@ def render_settings_tab(tab) -> None:
         button_hover_color=ACCENT_HOVER,
         text_color=MUTED,
         corner_radius=BUTTON_RADIUS,
-        command=on_theme_change, 
+        command=on_theme_change,
     ).grid(row=0, column=1, sticky="w")
-    row.grid_columnconfigure(1, weight=1)
+    theme_row.grid_columnconfigure(1, weight=1)
+
+    text_scale_var = tk.DoubleVar(value=prefs["text_scale"])
+
+    text_scale_row = ctk.CTkFrame(appearance_body, fg_color="transparent")
+    text_scale_row.pack(fill="x", pady=(6, 4))
+    ctk.CTkLabel(text_scale_row, text="Text size", font=FONT_UI).grid(
+        row=0, column=0, padx=(0, 8), sticky="w"
+    )
+    ctk.CTkSlider(
+        text_scale_row,
+        from_=0.9,
+        to=1.7,
+        number_of_steps=80,
+        variable=text_scale_var,
+    ).grid(row=0, column=1, sticky="we")
+    text_scale_row.grid_columnconfigure(1, weight=1)
+
+    text_scale_labels = ctk.CTkFrame(appearance_body, fg_color="transparent")
+    text_scale_labels.pack(fill="x", pady=(0, 10))
+    for col, label in enumerate(["Smaller", "Default", "Larger"]):
+        ctk.CTkLabel(
+            text_scale_labels,
+            text=label,
+            font=("Segoe UI", 10),
+            text_color=MUTED,
+        ).grid(row=0, column=col, sticky="we")
+        text_scale_labels.grid_columnconfigure(col, weight=1)
 
     temp_var = tk.DoubleVar(value=prefs["text_temperature"])
     max_tokens_var = tk.StringVar(value=str(prefs["text_max_tokens"]))
+
     text_body = _make_settings_card(
         scroll,
         "Text Responses",
@@ -387,6 +422,7 @@ def render_settings_tab(tab) -> None:
     seed_var = tk.StringVar(
         value="" if prefs["image_seed"] is None else str(prefs["image_seed"])
     )
+
     image_body = _make_settings_card(
         scroll,
         "Image Generation",
@@ -396,6 +432,7 @@ def render_settings_tab(tab) -> None:
     for label, var in [("Width", width_var), ("Height", height_var)]:
         ctk.CTkLabel(image_body, text=label, font=FONT_UI).pack(anchor="w", pady=(0, 4))
         ctk.CTkEntry(image_body, textvariable=var).pack(fill="x", pady=(0, 8))
+
     ctk.CTkLabel(image_body, text="Steps", font=FONT_UI).pack(anchor="w", pady=(0, 4))
     ctk.CTkSlider(
         image_body,
@@ -440,7 +477,6 @@ def render_settings_tab(tab) -> None:
         "for richer context—turn it off to keep sessions lighter.",
     )
 
-
     device_row = ctk.CTkFrame(interface_body, fg_color="transparent")
     device_row.pack(fill="x", pady=(0, 10))
 
@@ -463,23 +499,12 @@ def render_settings_tab(tab) -> None:
 
     scale_row = ctk.CTkFrame(interface_body, fg_color="transparent")
     scale_row.pack(fill="x", pady=(0, 10))
-
     ctk.CTkLabel(scale_row, text="UI scale", font=FONT_UI).grid(
         row=0, column=0, padx=(0, 8), sticky="w"
     )
-
     ctk.CTkSlider(
-        scale_row,
-        from_=0.9,
-        to=1.5,
-        number_of_steps=60,
-        variable=ui_scale_var,
-        fg_color=PANEL_ELEVATED,
-        progress_color=ACCENT,
-        button_color=ACCENT,
-        button_hover_color=ACCENT_HOVER,
+        scale_row, from_=0.9, to=1.5, number_of_steps=60, variable=ui_scale_var
     ).grid(row=0, column=1, sticky="we")
-
     scale_row.grid_columnconfigure(1, weight=1)
 
     ctk.CTkCheckBox(
@@ -487,11 +512,6 @@ def render_settings_tab(tab) -> None:
         text="Enable history (per-model, per-user)",
         variable=history_var,
         font=FONT_UI,
-        text_color=TEXT,
-        fg_color=ACCENT,
-        hover_color=ACCENT_HOVER,
-        border_color=CONTROL_BORDER,
-        checkmark_color=TEXT,
     ).pack(anchor="w", pady=(0, 4))
 
     ctk.CTkLabel(
@@ -612,27 +632,25 @@ def render_settings_tab(tab) -> None:
             "ui_scale": to_float(ui_scale_var.get(), 1.15),
             "device_preference": str(device_var.get()).lower(),
             "history_enabled": bool(history_var.get()),
-            "theme": theme_var.get(),
+            "text_scale": to_float(text_scale_var.get(), 1.15),
         }
         set_prefs(new_values)
-        
-        selected_theme = new_values["theme"]
-        switch_theme(selected_theme)
-        if gs.root:
-            recolor_whole_app(gs.root)
-
         if gs.mgr:
             gs.mgr.set_history_enabled(new_values["history_enabled"])
             gs.mgr.set_text_config(
                 max_tokens=new_values["text_max_tokens"],
                 temperature=new_values["text_temperature"],
             )
-        scale_value = float(new_values["ui_scale"])
+
+        ui_scale_value = float(new_values["ui_scale"])
+        text_scale_value = float(new_values.get("text_scale", ui_scale_value))
+
         try:
-            ctk.set_widget_scaling(scale_value)
-            apply_native_font_scale(scale_value)
+            ctk.set_widget_scaling(ui_scale_value)
+            apply_native_font_scale(text_scale_value)
         except Exception:
             pass
+
         update_status("Settings saved.")
         render_settings_tab(tab)
 
@@ -646,13 +664,13 @@ def render_settings_tab(tab) -> None:
         font=FONT_BOLD,
         corner_radius=BUTTON_RADIUS,
     ).pack(pady=(16, 20))
+
     ctk.CTkLabel(
         scroll,
         text="Made with <3 at the University of Missouri",
         font=FONT_UI,
         text_color=MUTED,
     ).pack(pady=(0, 16))
-
 
 def open_settings() -> None:
     if not gs.tabs:
@@ -954,7 +972,7 @@ def build_main_ui() -> None:
     )
     gs.entry.pack(fill="both", expand=True, padx=6, pady=4)
     gs.entry.insert("1.0", "Ask me anything...")
-    apply_native_font_scale(prefs["ui_scale"])
+    apply_native_font_scale(prefs.get("text_scale", prefs["ui_scale"]))
 
     def on_focus_in(event) -> None:
         if gs.entry.get("1.0", "end-1c") == "Ask me anything...":
@@ -1445,8 +1463,7 @@ def run_app() -> None:
     )
     gs.workspace_frame.pack(fill="both", expand=True, padx=8, pady=8)
     ctk.set_widget_scaling(prefs["ui_scale"])
-    apply_native_font_scale(prefs["ui_scale"])
+    apply_native_font_scale(prefs.get("text_scale", prefs["ui_scale"]))
     build_gate_ui()
-    recolor_whole_app(gs.root)
     gs.root.protocol("WM_DELETE_WINDOW", on_close)
     gs.root.mainloop()

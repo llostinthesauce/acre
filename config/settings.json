@@ -31,10 +31,11 @@
     "image_steps": 14,
     "image_guidance": 1.9499999999999993,
     "image_seed": null,
-    "ui_scale": 0.91,
+    "ui_scale": 0.9,
     "device_preference": "auto",
     "history_enabled": true,
-    "theme": "Blue"
+    "theme": "Green",
+    "text_scale": 1.26
   },
   "per_user": {}
 }

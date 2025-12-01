@@ -5,5 +5,5 @@ description = "LLM Switchboard"
 requires-python = ">=3.10"
 dynamic = ["dependencies"]
 
-[tool.setuptools.dynamic]
-dependencies = {file = ["requirements.txt"]}
+[tool.setuptools]
+py-modules = []

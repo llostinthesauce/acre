@@ -35,7 +35,8 @@
     "device_preference": "auto",
     "history_enabled": true,
     "theme": "Green",
-    "text_scale": 1.26
+    "text_scale": 1.55,
+    "chat_text_scale": 1.55
   },
   "per_user": {}
 }

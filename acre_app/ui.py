@@ -327,7 +327,7 @@ def render_settings_tab(tab) -> None:
     current_theme = prefs.get("theme", "Blue")
     theme_var = tk.StringVar(value=current_theme)
 
-    def on_theme_change(choice: str) -> None:
+    def on_theme_change(choice: str):
         try:
             set_prefs({"theme": choice})
         except Exception:
@@ -337,15 +337,15 @@ def render_settings_tab(tab) -> None:
             recolor_whole_app(gs.root)
         update_status(f"Theme set to {choice}")
 
-    theme_row = ctk.CTkFrame(appearance_body, fg_color="transparent")
-    theme_row.pack(fill="x", pady=(0, 6))
+    row = ctk.CTkFrame(appearance_body, fg_color="transparent")
+    row.pack(fill="x", pady=(0, 6))
 
-    ctk.CTkLabel(theme_row, text="Theme", font=FONT_UI).grid(
+    ctk.CTkLabel(row, text="Theme", font=FONT_UI).grid(
         row=0, column=0, padx=(0, 8), sticky="w"
     )
 
     ctk.CTkOptionMenu(
-        theme_row,
+        row,
         values=list(THEMES.keys()),
         variable=theme_var,
         font=FONT_UI,
@@ -357,23 +357,41 @@ def render_settings_tab(tab) -> None:
         corner_radius=BUTTON_RADIUS,
         command=on_theme_change,
     ).grid(row=0, column=1, sticky="w")
-    theme_row.grid_columnconfigure(1, weight=1)
+    row.grid_columnconfigure(1, weight=1)
 
     text_scale_var = tk.DoubleVar(value=prefs["text_scale"])
 
-    text_scale_row = ctk.CTkFrame(appearance_body, fg_color="transparent")
-    text_scale_row.pack(fill="x", pady=(6, 4))
-    ctk.CTkLabel(text_scale_row, text="Text size", font=FONT_UI).grid(
+    ui_text_row = ctk.CTkFrame(appearance_body, fg_color="transparent")
+    ui_text_row.pack(fill="x", pady=(6, 4))
+    ctk.CTkLabel(ui_text_row, text="App text size", font=FONT_UI).grid(
         row=0, column=0, padx=(0, 8), sticky="w"
     )
     ctk.CTkSlider(
-        text_scale_row,
+        ui_text_row,
         from_=0.9,
         to=1.7,
         number_of_steps=80,
         variable=text_scale_var,
     ).grid(row=0, column=1, sticky="we")
-    text_scale_row.grid_columnconfigure(1, weight=1)
+    ui_text_row.grid_columnconfigure(1, weight=1)
+
+    chat_text_scale_var = tk.DoubleVar(
+        value=prefs.get("chat_text_scale", prefs["text_scale"])
+    )
+
+    chat_text_row = ctk.CTkFrame(appearance_body, fg_color="transparent")
+    chat_text_row.pack(fill="x", pady=(6, 4))
+    ctk.CTkLabel(chat_text_row, text="Chat text size", font=FONT_UI).grid(
+        row=0, column=0, padx=(0, 8), sticky="w"
+    )
+    ctk.CTkSlider(
+        chat_text_row,
+        from_=0.9,
+        to=1.7,
+        number_of_steps=80,
+        variable=chat_text_scale_var,
+    ).grid(row=0, column=1, sticky="we")
+    chat_text_row.grid_columnconfigure(1, weight=1)
 
     text_scale_labels = ctk.CTkFrame(appearance_body, fg_color="transparent")
     text_scale_labels.pack(fill="x", pady=(0, 10))
@@ -385,7 +403,6 @@ def render_settings_tab(tab) -> None:
             text_color=MUTED,
         ).grid(row=0, column=col, sticky="we")
         text_scale_labels.grid_columnconfigure(col, weight=1)
-
     temp_var = tk.DoubleVar(value=prefs["text_temperature"])
     max_tokens_var = tk.StringVar(value=str(prefs["text_max_tokens"]))
 
@@ -633,6 +650,7 @@ def render_settings_tab(tab) -> None:
             "device_preference": str(device_var.get()).lower(),
             "history_enabled": bool(history_var.get()),
             "text_scale": to_float(text_scale_var.get(), 1.15),
+            "chat_text_scale": to_float(chat_text_scale_var.get(), 1.15),
         }
         set_prefs(new_values)
         if gs.mgr:
@@ -644,10 +662,23 @@ def render_settings_tab(tab) -> None:
 
         ui_scale_value = float(new_values["ui_scale"])
         text_scale_value = float(new_values.get("text_scale", ui_scale_value))
+        chat_scale_value = float(
+            new_values.get("chat_text_scale", text_scale_value)
+        )
 
         try:
             ctk.set_widget_scaling(ui_scale_value)
             apply_native_font_scale(text_scale_value)
+
+            family, base_size = FONT_UI[0], FONT_UI[1]
+            rest = FONT_UI[2:] if len(FONT_UI) > 2 else ()
+            new_size = max(8, int(base_size * chat_scale_value))
+            chat_font = (family, new_size) + rest
+
+            if gs.chat_history:
+                gs.chat_history.configure(font=chat_font)
+            if gs.entry:
+                gs.entry.configure(font=chat_font)
         except Exception:
             pass
 
@@ -664,7 +695,6 @@ def render_settings_tab(tab) -> None:
         font=FONT_BOLD,
         corner_radius=BUTTON_RADIUS,
     ).pack(pady=(16, 20))
-
     ctk.CTkLabel(
         scroll,
         text="Made with <3 at the University of Missouri",
@@ -692,6 +722,15 @@ def build_main_ui() -> None:
     settings = load_settings()
     history_dir = str(Path("history") / gs.current_user) if gs.current_user else "history"
     prefs = get_prefs()
+    
+    chat_scale = prefs.get(
+        "chat_text_scale",
+        prefs.get("text_scale", prefs["ui_scale"]),
+    )
+    family, base_size = FONT_UI[0], FONT_UI[1]
+    rest = FONT_UI[2:] if len(FONT_UI) > 2 else ()
+    chat_font = (family, max(8, int(base_size * chat_scale))) + rest
+
     from model_manager import ModelManager
 
     gs.mgr = ModelManager(
@@ -753,7 +792,7 @@ def build_main_ui() -> None:
         bd=0,
     )
     gs.listbox.pack(fill="both", expand=True, padx=0, pady=2)
-    apply_native_font_scale(prefs["ui_scale"])
+    apply_native_font_scale(prefs.get("text_scale", prefs["ui_scale"]))
     menu = tk.Menu(gs.listbox, tearoff=0, font=FONT_UI)
     menu.add_command(label="Rename…", command=rename_model)
 
@@ -901,7 +940,7 @@ def build_main_ui() -> None:
         corner_radius=RADIUS_LG,
         fg_color=SURFACE_PRIMARY,
         text_color=TEXT,
-        font=FONT_UI,
+        font=chat_font,
         wrap="word",
     )
     gs.chat_history.pack(fill="both", expand=True, padx=18, pady=18)
@@ -969,6 +1008,7 @@ def build_main_ui() -> None:
         relief="flat",
         highlightthickness=0,
         bd=0,
+        font=chat_font,
     )
     gs.entry.pack(fill="both", expand=True, padx=6, pady=4)
     gs.entry.insert("1.0", "Ask me anything...")

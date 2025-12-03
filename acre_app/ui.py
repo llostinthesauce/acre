@@ -4,6 +4,7 @@ import time
 import tkinter as tk
 from pathlib import Path
 from tkinter import messagebox
+import json
 from typing import Optional
 
 import customtkinter as ctk
@@ -28,10 +29,10 @@ from .constants import (
     FONT_H1,
     FONT_H2,
     FONT_UI,
+    GLASS_BG,
     MUTED,
     OUTPUTS_PATH,
     PANEL_ELEVATED,
-    GLASS_BG,
     RADIUS_LG,
     RADIUS_MD,
     RADIUS_SM,
@@ -44,9 +45,13 @@ from .constants import (
     TITLE_BAR_ACCENT,
     TITLE_BAR_COLOR,
     TITLE_BAR_HEIGHT,
+    THEMES,
+    switch_theme,
+    CONFIG_PATH,
 )
 from .gallery import ensure_user_dirs, refresh_gallery
 from .models import add_model, pick_model, refresh_list, rename_model
+from .training import open_training_dialog
 from .prompt import run_prompt
 from .settings import (
     clear_remember_me,
@@ -65,7 +70,7 @@ from .settings import (
     set_remember_me,
     verify_password,
 )
-from .ui_helpers import apply_native_font_scale, update_logo_visibility, update_status
+from .ui_helpers import apply_native_font_scale, update_logo_visibility, update_status, recolor_whole_app
 from .utils import open_path, to_float, to_int
 
 
@@ -139,10 +144,42 @@ def build_title_bar() -> None:
     )
     title_label.pack(side="left", padx=16)
 
+    
+
     for widget in (bar, title_label):
         widget.bind("<ButtonPress-1>", start_move)
         widget.bind("<ButtonRelease-1>", stop_move)
         widget.bind("<B1-Motion>", do_move)
+
+    def _get_saved_theme_name() -> str:
+        try:
+            data = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+            return data.get("prefs", {}).get("theme", "Blue")
+        except Exception:
+            return "Blue"
+
+    theme_var = ctk.StringVar(value=_get_saved_theme_name())
+
+    def on_theme_change(choice: str):
+        switch_theme(choice)
+        if gs.root:
+            recolor_whole_app(gs.root)
+        update_status(f"Theme set to {choice}")
+
+    theme_picker = ctk.CTkOptionMenu(
+        bar,
+        values=list(THEMES.keys()),
+        variable=theme_var,
+        command=on_theme_change,
+        font=FONT_UI,
+        dropdown_font=FONT_UI,
+        fg_color=CONTROL_BG,
+        button_color=ACCENT,
+        button_hover_color=ACCENT_HOVER,
+        text_color=MUTED,
+        corner_radius=BUTTON_RADIUS,
+    )
+    theme_picker.pack(side="right", padx=(0, 10), pady=8)
 
     def minimize_app() -> None:
         gs.drag_offset = None
@@ -290,6 +327,48 @@ def render_settings_tab(tab) -> None:
         justify="left",
     ).pack(anchor="w", padx=4, pady=(0, 12))
 
+    appearance_body = _make_settings_card(
+        scroll,
+        "Appearance",
+        "Pick a color theme. All colors update immediately and your choice is saved.",
+    )
+
+    current_theme = prefs.get("theme", "Blue")
+    theme_var = tk.StringVar(value=current_theme)
+
+    current_theme = get_prefs().get("theme", "Blue")
+    theme_var = tk.StringVar(value=current_theme)
+
+    def on_theme_change(choice: str):
+        try:
+            set_prefs({"theme": choice})
+        except Exception:
+            pass
+        switch_theme(choice)
+        if gs.root:
+            recolor_whole_app(gs.root)
+        update_status(f"Theme set to {choice}")
+
+    row = ctk.CTkFrame(appearance_body, fg_color="transparent")
+    row.pack(fill="x", pady=(0, 6))
+
+    ctk.CTkLabel(row, text="Theme", font=FONT_UI).grid(row=0, column=0, padx=(0, 8), sticky="w")
+
+    ctk.CTkOptionMenu(
+        row,
+        values=list(THEMES.keys()),
+        variable=theme_var,
+        font=FONT_UI,
+        dropdown_font=FONT_UI,
+        fg_color=CONTROL_BG,
+        button_color=ACCENT,
+        button_hover_color=ACCENT_HOVER,
+        text_color=MUTED,
+        corner_radius=BUTTON_RADIUS,
+        command=on_theme_change, 
+    ).grid(row=0, column=1, sticky="w")
+    row.grid_columnconfigure(1, weight=1)
+
     temp_var = tk.DoubleVar(value=prefs["text_temperature"])
     max_tokens_var = tk.StringVar(value=str(prefs["text_max_tokens"]))
     text_body = _make_settings_card(
@@ -302,8 +381,17 @@ def render_settings_tab(tab) -> None:
         anchor="w", pady=(0, 4)
     )
     ctk.CTkSlider(
-        text_body, from_=0.0, to=1.5, number_of_steps=150, variable=temp_var
+        text_body,
+        from_=0.0,
+        to=1.5,
+        number_of_steps=150,
+        variable=temp_var,
+        fg_color=PANEL_ELEVATED,
+        progress_color=ACCENT,
+        button_color=ACCENT,
+        button_hover_color=ACCENT_HOVER,
     ).pack(fill="x", pady=(0, 8))
+
     ctk.CTkLabel(text_body, text="Max new tokens", font=FONT_UI).pack(
         anchor="w", pady=(0, 4)
     )
@@ -327,14 +415,32 @@ def render_settings_tab(tab) -> None:
         ctk.CTkEntry(image_body, textvariable=var).pack(fill="x", pady=(0, 8))
     ctk.CTkLabel(image_body, text="Steps", font=FONT_UI).pack(anchor="w", pady=(0, 4))
     ctk.CTkSlider(
-        image_body, from_=1, to=50, number_of_steps=49, variable=steps_var
+        image_body,
+        from_=1,
+        to=50,
+        number_of_steps=49,
+        variable=steps_var,
+        fg_color=PANEL_ELEVATED,
+        progress_color=ACCENT,
+        button_color=ACCENT,
+        button_hover_color=ACCENT_HOVER,
     ).pack(fill="x", pady=(0, 8))
+
     ctk.CTkLabel(image_body, text="Guidance", font=FONT_UI).pack(
         anchor="w", pady=(0, 4)
     )
     ctk.CTkSlider(
-        image_body, from_=0.0, to=7.5, number_of_steps=150, variable=guidance_var
+        image_body,
+        from_=0.0,
+        to=7.5,
+        number_of_steps=150,
+        variable=guidance_var,
+        fg_color=PANEL_ELEVATED,
+        progress_color=ACCENT,
+        button_color=ACCENT,
+        button_hover_color=ACCENT_HOVER,
     ).pack(fill="x", pady=(0, 8))
+
     ctk.CTkLabel(image_body, text="Seed (blank = random)", font=FONT_UI).pack(
         anchor="w", pady=(0, 4)
     )
@@ -343,35 +449,68 @@ def render_settings_tab(tab) -> None:
     device_var = tk.StringVar(value=prefs["device_preference"])
     ui_scale_var = tk.DoubleVar(value=prefs["ui_scale"])
     history_var = tk.BooleanVar(value=prefs["history_enabled"])
+
     interface_body = _make_settings_card(
         scroll,
         "Interface & Performance",
         "Pick where heavy lifting happens and how big the UI renders. History keeps past chats per model "
         "for richer context—turn it off to keep sessions lighter.",
     )
+
+
     device_row = ctk.CTkFrame(interface_body, fg_color="transparent")
     device_row.pack(fill="x", pady=(0, 10))
+
     ctk.CTkLabel(device_row, text="Device preference", font=FONT_UI).grid(
         row=0, column=0, padx=(0, 8), sticky="w"
     )
+
     ctk.CTkOptionMenu(
-        device_row, values=["auto", "mps", "cuda", "cpu"], variable=device_var, font=FONT_UI
+        device_row,
+        values=["auto", "mps", "cuda", "cpu"],
+        variable=device_var,
+        font=FONT_UI,
+        dropdown_font=FONT_UI,
+        fg_color=CONTROL_BG,
+        text_color=TEXT,
+        button_color=ACCENT,
+        button_hover_color=ACCENT_HOVER,
+        corner_radius=BUTTON_RADIUS,
     ).grid(row=0, column=1, sticky="w")
+
     scale_row = ctk.CTkFrame(interface_body, fg_color="transparent")
     scale_row.pack(fill="x", pady=(0, 10))
+
     ctk.CTkLabel(scale_row, text="UI scale", font=FONT_UI).grid(
         row=0, column=0, padx=(0, 8), sticky="w"
     )
+
     ctk.CTkSlider(
-        scale_row, from_=0.9, to=1.5, number_of_steps=60, variable=ui_scale_var
+        scale_row,
+        from_=0.9,
+        to=1.5,
+        number_of_steps=60,
+        variable=ui_scale_var,
+        fg_color=PANEL_ELEVATED,
+        progress_color=ACCENT,
+        button_color=ACCENT,
+        button_hover_color=ACCENT_HOVER,
     ).grid(row=0, column=1, sticky="we")
+
     scale_row.grid_columnconfigure(1, weight=1)
+
     ctk.CTkCheckBox(
         interface_body,
         text="Enable history (per-model, per-user)",
         variable=history_var,
         font=FONT_UI,
+        text_color=TEXT,
+        fg_color=ACCENT,
+        hover_color=ACCENT_HOVER,
+        border_color=CONTROL_BORDER,
+        checkmark_color=TEXT,
     ).pack(anchor="w", pady=(0, 4))
+
     ctk.CTkLabel(
         interface_body,
         text="Offline mode is always on so nothing leaves this machine.",
@@ -490,8 +629,15 @@ def render_settings_tab(tab) -> None:
             "ui_scale": to_float(ui_scale_var.get(), 1.15),
             "device_preference": str(device_var.get()).lower(),
             "history_enabled": bool(history_var.get()),
+            "theme": theme_var.get(),
         }
         set_prefs(new_values)
+        
+        selected_theme = new_values["theme"]
+        switch_theme(selected_theme)
+        if gs.root:
+            recolor_whole_app(gs.root)
+
         if gs.mgr:
             gs.mgr.set_history_enabled(new_values["history_enabled"])
             gs.mgr.set_text_config(
@@ -659,6 +805,12 @@ def build_main_ui() -> None:
         gs.side_frame,
         text="Add Model",
         command=add_model,
+        **primary_button,
+    ).pack(**button_kwargs)
+    ctk.CTkButton(
+        gs.side_frame,
+        text="Train Model",
+        command=open_training_dialog,
         **primary_button,
     ).pack(**button_kwargs)
     ctk.CTkButton(
@@ -1128,8 +1280,19 @@ def build_gate_ui() -> None:
         row=0, column=0, padx=8, pady=8, sticky="w"
     )
     option_menu = ctk.CTkOptionMenu(
-        form, values=users_list, variable=who_var, font=FONT_UI, dropdown_font=FONT_UI
+        form,
+        values=users_list,
+        variable=who_var,
+        font=FONT_UI,
+        dropdown_font=FONT_UI,
+        fg_color=CONTROL_BG,
+        text_color=TEXT,
+        button_color=ACCENT,
+        button_hover_color=ACCENT_HOVER,
+        corner_radius=BUTTON_RADIUS,
     )
+    option_menu.grid(row=0, column=1, padx=8, pady=8, sticky="we")
+
     option_menu.grid(row=0, column=1, padx=8, pady=8, sticky="we")
     ctk.CTkLabel(form, text="Password", text_color=TEXT, font=FONT_UI).grid(
         row=1, column=0, padx=8, pady=8, sticky="w"
@@ -1149,8 +1312,13 @@ def build_gate_ui() -> None:
         font=FONT_UI,
     )
     remember_box.grid(row=2, column=0, columnspan=2, padx=8, pady=(0, 4), sticky="w")
+
+    def _focus_login_password() -> None:
+        if password_entry.winfo_exists():
+            password_entry.focus_force()
+
     if gs.root:
-        gs.root.after(100, lambda: password_entry.focus_force())
+        gs.root.after(100, _focus_login_password)
 
     def handle_login() -> None:
         settings_local = load_settings()
@@ -1231,10 +1399,23 @@ def build_gate_ui() -> None:
             ensure_encryption_metadata(settings_local, user)
         gs.current_user = user
         gs.pending_user = None
-        Path("models").mkdir(parents=True, exist_ok=True)
-        Path("history").mkdir(parents=True, exist_ok=True)
-        Path("outputs").mkdir(parents=True, exist_ok=True)
-        ensure_user_dirs()
+        try:
+            Path("models").mkdir(parents=True, exist_ok=True)
+            Path("history").mkdir(parents=True, exist_ok=True)
+            Path("outputs").mkdir(parents=True, exist_ok=True)
+            ensure_user_dirs()
+        except PermissionError:
+            messagebox.showerror(
+                "Permission Denied",
+                "Unable to create required directories. Please check file permissions."
+            )
+            return
+        except Exception as e:
+            messagebox.showerror(
+                "Error",
+                f"Failed to create directories: {e}"
+            )
+            return
         try:
             if gs.gate_frame:
                 gs.gate_frame.destroy()
@@ -1350,7 +1531,67 @@ def on_close() -> None:
         gs.root.destroy()
 
 
+def _check_display_server() -> tuple[bool, Optional[str]]:
+    import os
+    import sys
+    import subprocess
+    import shutil
+
+    if sys.platform == "darwin" or sys.platform == "win32":
+        return True, None
+
+    def _display_is_available() -> bool:
+        try:
+            result = subprocess.run(
+                ["xdpyinfo"],
+                timeout=2,
+                stderr=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+            )
+            return result.returncode == 0
+        except subprocess.TimeoutExpired:
+            return False
+        except (FileNotFoundError, OSError):
+            # If xdpyinfo is missing we assume the display might still be fine.
+            return True
+
+    if os.environ.get("DISPLAY") and _display_is_available():
+        return True, None
+
+    xvfb_path = shutil.which("Xvfb")
+    if xvfb_path:
+        target_display = ":99"
+        try:
+            subprocess.Popen(
+                [xvfb_path, target_display, "-screen", "0", "1024x768x24"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            time.sleep(0.3)
+            os.environ["DISPLAY"] = target_display
+        except OSError as exc:
+            return False, f"Failed to start Xvfb automatically: {exc}. GUI requires X11 display server."
+
+        if _display_is_available():
+            return True, None
+        return False, "Attempted to start Xvfb automatically, but X server is still not accessible."
+
+    if not os.environ.get("DISPLAY"):
+        return False, "DISPLAY environment variable is not set and Xvfb is not installed. GUI requires X11 display server."
+
+    return False, "X server is not accessible. Please start X server or install Xvfb for headless mode."
+
+
 def run_app() -> None:
+    display_ok, display_error = _check_display_server()
+    if not display_ok:
+        import sys
+        print(f"ERROR: {display_error}", file=sys.stderr)
+        print("TIP: For headless Linux systems, use Xvfb:", file=sys.stderr)
+        print("  Xvfb :99 -screen 0 1024x768x24 &", file=sys.stderr)
+        print("  export DISPLAY=:99", file=sys.stderr)
+        sys.exit(1)
+    
     prefs = get_prefs()
     ctk.set_appearance_mode("dark")
     ctk.set_default_color_theme("blue")
@@ -1367,5 +1608,6 @@ def run_app() -> None:
     ctk.set_widget_scaling(prefs["ui_scale"])
     apply_native_font_scale(prefs["ui_scale"])
     build_gate_ui()
+    recolor_whole_app(gs.root)
     gs.root.protocol("WM_DELETE_WINDOW", on_close)
     gs.root.mainloop()

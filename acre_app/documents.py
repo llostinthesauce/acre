@@ -10,7 +10,7 @@ class DocumentReadError(RuntimeError):
 
 def _read_pdf(path: Path) -> str:
     try:
-        import fitz  # type: ignore
+        import fitz
     except Exception as exc:
         raise DocumentReadError("PyMuPDF is required to read PDF files.") from exc
     try:
@@ -31,11 +31,14 @@ def _read_pdf(path: Path) -> str:
 
 def _read_text_file(path: Path) -> str:
     try:
-        data = path.read_text(encoding="utf-8")
-    except UnicodeDecodeError:
-        data = path.read_text(encoding="latin-1")
-    except Exception as exc:
-        raise DocumentReadError(f"Unable to read file: {exc}") from exc
+        data = path.read_text(encoding="utf-8", errors="replace")
+    except Exception:
+        try:
+            data = path.read_text(encoding="latin-1", errors="replace")
+        except Exception as exc:
+            raise DocumentReadError(f"Unable to read file: {exc}") from exc
+    
+    data = data.replace("\r\n", "\n").replace("\r", "\n")
     cleaned = data.strip()
     if not cleaned:
         raise DocumentReadError("File appears to be empty.")

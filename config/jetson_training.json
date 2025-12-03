@@ -1,0 +1,16 @@
+{
+  "name": "Jetson Edge LoRA",
+  "dataset": "example_datasets/jetson_training.json",
+  "defaults": {
+    "epochs": 1,
+    "learning_rate": 0.00025,
+    "batch_size": 1
+  },
+  "training_arguments": {
+    "gradient_accumulation_steps": 4,
+    "gradient_checkpointing": true,
+    "dataloader_num_workers": 0
+  },
+  "swap_directory": "outputs/jetson_training_swap",
+  "notes": "This profile keeps training lightweight by combining gradient accumulation and checkpointing. The documented dataset covers Jetson-specific edge AI topics and the output is stored alongside the swap directory defined here."
+}

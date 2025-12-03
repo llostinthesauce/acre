@@ -26,6 +26,9 @@ def run_prompt() -> None:
     if not gs.mgr or not gs.mgr.is_loaded():
         update_status("Load a model before sending a prompt.")
         return
+    if hasattr(gs.mgr, "_generating") and gs.mgr._generating:
+        update_status("Generation in progress. Please wait...")
+        return
     gs.entry.delete("1.0", tk.END)
     if hasattr(gs.mgr, "is_tts_backend") and gs.mgr.is_tts_backend():
         update_status("Synthesizing audio...")
@@ -63,6 +66,11 @@ def run_prompt() -> None:
             error = None
             try:
                 gs.mgr.generate(prompt_text)
+            except RuntimeError as exc:
+                if "already in progress" in str(exc):
+                    error = "Please wait for the current generation to complete before sending another query."
+                else:
+                    error = str(exc)
             except Exception as exc:
                 error = str(exc)
 

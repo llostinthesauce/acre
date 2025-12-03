@@ -1,5 +1,6 @@
 import re
 import threading
+import time
 import tkinter as tk
 
 from . import global_state as gs
@@ -15,6 +16,39 @@ THINK_TAG_PATTERN = re.compile(r"\s*/(no_)?think\s*$", re.IGNORECASE)
 def _display_prompt_text(text: str) -> str:
     cleaned = THINK_TAG_PATTERN.sub("", text).strip()
     return cleaned or text
+
+
+def _estimate_tokens(text: str) -> int:
+    if not text:
+        return 0
+    return max(1, len(text.split()))
+
+
+def _log_benchmark(prompt_text: str, response_text: str, duration: float) -> None:
+    user_bucket = gs.current_user or "_global_"
+    bench_dir = OUTPUTS_PATH / user_bucket
+    bench_dir.mkdir(parents=True, exist_ok=True)
+    bench_file = bench_dir / "benchmarks.txt"
+    model = getattr(gs.mgr, "_current_model_name", "unknown")
+    backend = getattr(gs.mgr, "backend", "unknown")
+    device = getattr(gs.mgr, "_device_pref", "unknown")
+    tokens = _estimate_tokens(response_text)
+    tps = tokens / duration if duration > 0 else 0.0
+    entry = (
+        f"Model: {model}\n"
+        f"Backend: {backend}\n"
+        f"Device: {device}\n"
+        f"Duration_sec: {duration:.3f}\n"
+        f"Tokens_est: {tokens}\n"
+        f"TPS_est: {tps:.2f}\n"
+        f"Prompt_chars: {len(prompt_text)}\n"
+        f"Response_chars: {len(response_text)}\n"
+        "----\n"
+    )
+    bench_file.write_text(
+        bench_file.read_text(encoding="utf-8") + entry if bench_file.exists() else entry,
+        encoding="utf-8",
+    )
 
 
 def run_prompt() -> None:
@@ -64,8 +98,10 @@ def run_prompt() -> None:
 
         def worker_text(prompt_text: str) -> None:
             error = None
+            response_text = ""
+            start_time = time.time()
             try:
-                gs.mgr.generate(prompt_text)
+                response_text = gs.mgr.generate(prompt_text)
             except RuntimeError as exc:
                 if "already in progress" in str(exc):
                     error = "Please wait for the current generation to complete before sending another query."
@@ -73,10 +109,16 @@ def run_prompt() -> None:
                     error = str(exc)
             except Exception as exc:
                 error = str(exc)
+            duration = time.time() - start_time
 
             def done_text() -> None:
                 update_status(error if error else "Done")
                 render_history()
+                if not error:
+                    try:
+                        _log_benchmark(prompt_text, response_text, duration)
+                    except Exception:
+                        pass
 
             gs.root.after(0, done_text)
 

@@ -34,14 +34,27 @@ def _check_training_dependencies():
     try:
         import torch
         from transformers import AutoModelForCausalLM, AutoTokenizer, TrainingArguments, Trainer, DataCollatorForLanguageModeling
-        from peft import LoraConfig, get_peft_model, TaskType
         from datasets import Dataset
         return True, None
     except ImportError as e:
-        return False, f"Missing dependency: {e}. Install PyTorch, transformers, peft, and datasets."
+        return False, f"Missing dependency: {e}. Install PyTorch, transformers, and datasets."
 
 
 def _load_dataset(path: Path) -> List[Dict[str, str]]:
+    if path.suffix.lower() in {".jsonl", ".jsonlines"}:
+        records: List[Dict[str, str]] = []
+        with path.open("r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                    if isinstance(obj, dict):
+                        records.append(obj)
+                except Exception:
+                    continue
+        return records
     with open(path, 'r', encoding='utf-8') as f:
         data = json.load(f)
     if isinstance(data, list):
@@ -133,7 +146,7 @@ def open_training_dialog():
     main_frame.pack(fill="both", expand=True, padx=20, pady=20)
     
     ctk.CTkLabel(main_frame, text="Fine-Tune Model", font=("", 18, "bold"), text_color=TEXT).pack(anchor="w", pady=(0, 10))
-    ctk.CTkLabel(main_frame, text="Fine-tune a base model on your dataset.", font=FONT_UI, text_color=MUTED, wraplength=560).pack(anchor="w", pady=(0, 20))
+    ctk.CTkLabel(main_frame, text="Fine-tune a base model on your dataset (full-model training, no LoRA).", font=FONT_UI, text_color=MUTED, wraplength=560).pack(anchor="w", pady=(0, 20))
     
     model_var = tk.StringVar(value=text_models[0] if text_models else "")
     ctk.CTkLabel(main_frame, text="Base Model:", font=FONT_BOLD, text_color=TEXT).pack(anchor="w", pady=(0, 5))
@@ -156,7 +169,7 @@ def open_training_dialog():
     ctk.CTkLabel(main_frame, text="Dataset:", font=FONT_BOLD, text_color=TEXT).pack(anchor="w", pady=(0, 5))
     
     def select_file():
-        path = filedialog.askopenfilename(title="Select Dataset", filetypes=[("JSON", "*.json")])
+        path = filedialog.askopenfilename(title="Select Dataset", filetypes=[("JSON/JSONL", "*.json *.jsonl *.jsonlines")])
         if path:
             try:
                 data = _load_dataset(Path(path))
@@ -259,7 +272,7 @@ def open_training_dialog():
             return
         
         base_model = model_var.get()
-        output_name = output_var.get().strip() or f"{base_model}-lora"
+        output_name = output_var.get().strip() or f"{base_model}-ft"
         
         if dataset_path_var.get() == "__demo__":
             training_data = _create_demo_dataset()
@@ -312,7 +325,6 @@ def _run_training(
 ):
     import torch
     from datasets import Dataset
-    from peft import LoraConfig, TaskType, get_peft_model
     from transformers import (
         AutoModelForCausalLM,
         AutoTokenizer,
@@ -343,18 +355,7 @@ def _run_training(
     if device == "cpu":
         model = model.to(device)
 
-    progress_callback("Applying LoRA...", 0.2)
-    lora_config = LoraConfig(
-        task_type=TaskType.CAUSAL_LM,
-        r=8,
-        lora_alpha=16,
-        lora_dropout=0.1,
-        target_modules=["q_proj", "v_proj", "k_proj", "o_proj"],
-        bias="none",
-    )
-    model = get_peft_model(model, lora_config)
-
-    progress_callback("Preparing dataset...", 0.3)
+    progress_callback("Preparing dataset...", 0.2)
     texts = [
         f"### Instruction:\n{ex.get('instruction', '')}\n\n### Response:\n{ex.get('response', '')}\n"
         for ex in training_data
@@ -367,8 +368,8 @@ def _run_training(
     tokenized = dataset.map(tokenize, batched=True, remove_columns=["text"])
 
     if jetson_profile:
-        progress_callback("Jetson profile: checkpointing + accumulation active.", 0.35)
-    progress_callback("Starting training...", 0.4)
+        progress_callback("Jetson profile: checkpointing + accumulation active.", 0.25)
+    progress_callback("Starting training...", 0.3)
 
     output_dir = MODELS_PATH / output_name
     output_dir.mkdir(parents=True, exist_ok=True)

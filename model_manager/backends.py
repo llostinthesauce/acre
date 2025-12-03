@@ -145,7 +145,6 @@ class HFBackend(BaseBackend):
                 pass
 
     def _load_lora_model(self, model_dir: Path, model_kwargs: Dict[str, Any], trust_remote: bool) -> Any:
-        import torch as torch_module
         import json
         try:
             from peft import PeftModel
@@ -162,11 +161,11 @@ class HFBackend(BaseBackend):
             raise RuntimeError("adapter_config.json missing 'base_model_name_or_path'")
         base_model_path = Path(base_model_path_str)
         if not base_model_path.is_absolute():
-            if (model_dir / base_model_path_str).exists():
-                base_model_path = model_dir / base_model_path_str
+            candidate = (model_dir / base_model_path_str)
+            if candidate.exists():
+                base_model_path = candidate
             else:
-                from .config import MODELS_PATH as MP
-                base_model_path = MP / base_model_path_str
+                base_model_path = model_dir.parent / base_model_path_str
         if not base_model_path.exists():
             raise RuntimeError(f'Base model not found at: {base_model_path}. LoRA adapters require the base model to be available.')
         base_model_kwargs = {'pretrained_model_name_or_path': str(base_model_path), 'local_files_only': True, 'torch_dtype': model_kwargs.get('torch_dtype', 'auto'), 'low_cpu_mem_usage': True}

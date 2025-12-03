@@ -1,0 +1,2 @@
+{"instruction": "Summarize the role of Jetson Orin in edge AI.", "input": "", "output": "Jetson Orin is a small, energy-efficient computer with CUDA GPUs for running AI workloads at the edge without a data center."}
+{"instruction": "Explain why CUDA helps LLM inference on Jetson.", "input": "", "output": "CUDA offloads the heavy matrix multiplications to the Jetson GPU, giving faster tokens per second and freeing CPU resources for the rest of the system."}

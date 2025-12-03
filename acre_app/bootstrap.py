@@ -175,14 +175,12 @@ def setup_environment() -> None:
     
     if _requires_training() and not arm64_linux:
         training_packages = [
-            ("peft>=0.10.0", "peft"),
             ("datasets>=2.20.0", "datasets"),
         ]
         _ensure(training_packages)
     elif _requires_training() and arm64_linux:
         if not _need("torch"):
             training_packages = [
-                ("peft>=0.10.0", "peft"),
                 ("datasets>=2.20.0", "datasets"),
             ]
             _ensure(training_packages)

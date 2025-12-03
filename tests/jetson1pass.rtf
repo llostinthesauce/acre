@@ -1,0 +1,64 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2867
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fswiss\fcharset0 Helvetica;}
+{\colortbl;\red255\green255\blue255;}
+{\*\expandedcolortbl;;}
+\margl1440\margr1440\vieww11520\viewh8400\viewkind0
+\pard\tx566\tx1133\tx1700\tx2267\tx2834\tx3401\tx3968\tx4535\tx5102\tx5669\tx6236\tx6803\pardirnatural\partightenfactor0
+
+\f0\fs24 \cf0 acre@acre-desktop:~/llama.cpp$ cd ~/llama.cpp\
+./build/bin/llama-bench \\\
+  -m /home/acre/ACRE_Capstone/acre/models/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf \\\
+  -p 64 \\\
+  -n 128 \\\
+  -b 256 \\\
+  -ub 128 \\\
+  -ngl 999 \\\
+  -r 3\
+ggml_cuda_init: GGML_CUDA_FORCE_MMQ:    no\
+ggml_cuda_init: GGML_CUDA_FORCE_CUBLAS: no\
+ggml_cuda_init: found 1 CUDA devices:\
+  Device 0: Orin, compute capability 8.7, VMM: yes\
+| model                          |       size |     params | backend    | ngl | n_batch | n_ubatch |            test |                  t/s |\
+| ------------------------------ | ---------: | ---------: | ---------- | --: | ------: | -------: | --------------: | -------------------: |\
+| llama 1B Q4_K - Medium         | 636.18 MiB |     1.10 B | CUDA       | 999 |     256 |      128 |            pp64 |     1046.51 \'b1 319.21 |\
+| llama 1B Q4_K - Medium         | 636.18 MiB |     1.10 B | CUDA       | 999 |     256 |      128 |           tg128 |         50.82 \'b1 0.24 |\
+\
+build: 877566d51 (7151)\
+acre@acre-desktop:~/llama.cpp$ cd ~/llama.cpp\
+./build/bin/llama-bench \\\
+  -m /home/acre/ACRE_Capstone/acre/models/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf \\\
+  -p 64 \\\
+  -n 128 \\\
+  -b 256 \\\
+  -ub 128 \\\
+  -ngl 999 \\\
+  -r 3\
+ggml_cuda_init: GGML_CUDA_FORCE_MMQ:    no\
+ggml_cuda_init: GGML_CUDA_FORCE_CUBLAS: no\
+ggml_cuda_init: found 1 CUDA devices:\
+  Device 0: Orin, compute capability 8.7, VMM: yes\
+| model                          |       size |     params | backend    | ngl | n_batch | n_ubatch |            test |                  t/s |\
+| ------------------------------ | ---------: | ---------: | ---------- | --: | ------: | -------: | --------------: | -------------------: |\
+| llama 1B Q4_K - Medium         | 636.18 MiB |     1.10 B | CUDA       | 999 |     256 |      128 |            pp64 |      989.40 \'b1 337.85 |\
+| llama 1B Q4_K - Medium         | 636.18 MiB |     1.10 B | CUDA       | 999 |     256 |      128 |           tg128 |         50.82 \'b1 0.27 |\
+\
+build: 877566d51 (7151)\
+acre@acre-desktop:~/llama.cpp$ cd ~/llama.cpp\
+./build/bin/llama-bench \\\
+  -m /home/acre/ACRE_Capstone/acre/models/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf \\\
+  -p 64 \\\
+  -n 128 \\\
+  -b 256 \\\
+  -ub 128 \\\
+  -ngl 999 \\\
+  -r 3\
+ggml_cuda_init: GGML_CUDA_FORCE_MMQ:    no\
+ggml_cuda_init: GGML_CUDA_FORCE_CUBLAS: no\
+ggml_cuda_init: found 1 CUDA devices:\
+  Device 0: Orin, compute capability 8.7, VMM: yes\
+| model                          |       size |     params | backend    | ngl | n_batch | n_ubatch |            test |                  t/s |\
+| ------------------------------ | ---------: | ---------: | ---------- | --: | ------: | -------: | --------------: | -------------------: |\
+| llama 1B Q4_K - Medium         | 636.18 MiB |     1.10 B | CUDA       | 999 |     256 |      128 |            pp64 |      997.56 \'b1 330.34 |\
+| llama 1B Q4_K - Medium         | 636.18 MiB |     1.10 B | CUDA       | 999 |     256 |      128 |           tg128 |         50.85 \'b1 0.14 |\
+\
+build: 877566d51 (7151)}

@@ -101,6 +101,8 @@ class ModelManager:
             return ('diffusers_t2i', directory, 'image')
         if (directory / 'quantize_config.json').exists():
             return ('auto_gptq', directory, 'text')
+        if (directory / 'adapter_config.json').exists():
+            return ('transformers', directory, 'text')
         config_path = directory / 'config.json'
         if not config_path.exists():
             return None

@@ -19,6 +19,8 @@ outputs/
 history/
 downloads/
 jetson/llama.cpp/
+dependencies/
+worktrees/
 
 # macOS junk
 .DS_Store

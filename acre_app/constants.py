@@ -1,3 +1,5 @@
+import platform
+import sys
 from pathlib import Path
 import json
 
@@ -210,7 +212,17 @@ _apply_theme_globals(THEMES.get(_read_theme_name(), THEMES["Blue"]))
 BASE_UI = 14
 BASE_H1 = 22
 BASE_H2 = 18
-FONT_FAMILY = "Lucida Grande"
+
+def _get_font_family() -> str:
+    system = platform.system().lower()
+    if system == "darwin":
+        return "Lucida Grande"
+    elif system == "windows":
+        return "Segoe UI"
+    else:
+        return "DejaVu Sans"
+
+FONT_FAMILY = _get_font_family()
 FONT_UI = (FONT_FAMILY, BASE_UI)
 FONT_BOLD = (FONT_FAMILY, BASE_UI, "bold")
 FONT_H1 = (FONT_FAMILY, BASE_H1, "bold")
@@ -236,4 +248,3 @@ RADIUS_SM = 10
 BUTTON_RADIUS = 12
 
 TITLE_BAR_HEIGHT = 46
-

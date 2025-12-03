@@ -1,9 +1,11 @@
 import gc
 import os
+import time
 import tkinter as tk
 from pathlib import Path
 from tkinter import messagebox
 import json
+from typing import Optional
 
 import customtkinter as ctk
 from PIL import Image, ImageTk
@@ -27,10 +29,10 @@ from .constants import (
     FONT_H1,
     FONT_H2,
     FONT_UI,
+    GLASS_BG,
     MUTED,
     OUTPUTS_PATH,
     PANEL_ELEVATED,
-    GLASS_BG,
     RADIUS_LG,
     RADIUS_MD,
     RADIUS_SM,
@@ -49,12 +51,15 @@ from .constants import (
 )
 from .gallery import ensure_user_dirs, refresh_gallery
 from .models import add_model, pick_model, refresh_list, rename_model
+from .training import open_training_dialog
 from .prompt import run_prompt
 from .settings import (
+    clear_remember_me,
     ensure_users_bucket,
     ensure_encryption_metadata,
     get_active_user,
     get_prefs,
+    get_remembered_user,
     list_usernames,
     load_settings,
     save_settings,
@@ -62,6 +67,7 @@ from .settings import (
     set_credentials,
     set_prefs,
     set_disclaimer_ack,
+    set_remember_me,
     verify_password,
 )
 from .ui_helpers import apply_native_font_scale, update_logo_visibility, update_status, recolor_whole_app
@@ -83,6 +89,14 @@ def _clear_all_histories() -> None:
 
 
 def _clear_caches() -> None:
+    mgr = gs.mgr
+    if mgr:
+        try:
+            mgr.cleanup_memory()
+            update_status("Caches cleared.")
+            return
+        except Exception:
+            pass
     try:
         import torch
 
@@ -233,6 +247,9 @@ def logout_action() -> None:
             gs.mgr.unload()
     except Exception:
         pass
+    if gs.current_user:
+        settings = load_settings()
+        clear_remember_me(settings, gs.current_user)
     gs.current_user = None
     gs.pending_user = None
     gs.encryption_key = None
@@ -849,6 +866,12 @@ def build_main_ui() -> None:
     ).pack(**button_kwargs)
     ctk.CTkButton(
         gs.side_frame,
+        text="Train Model",
+        command=open_training_dialog,
+        **primary_button,
+    ).pack(**button_kwargs)
+    ctk.CTkButton(
+        gs.side_frame,
         text="Clear History",
         command=clear_chat,
         corner_radius=BUTTON_RADIUS,
@@ -1149,6 +1172,16 @@ def build_gate_ui() -> None:
     settings = load_settings()
     users = list_usernames(settings)
     first_run = len(users) == 0
+    remembered_info = get_remembered_user(settings)
+    remember_ready: Optional[tuple[str, bytes]] = None
+    remember_pending: Optional[tuple[str, bytes]] = None
+    if remembered_info:
+        remembered_user, remembered_key = remembered_info
+        record = ensure_users_bucket(settings).get(remembered_user, {})
+        if record and record.get("disclaimer_ack"):
+            remember_ready = (remembered_user, remembered_key)
+        else:
+            remember_pending = (remembered_user, remembered_key)
     gs.login_password_entry = None
     gs.pending_user = None
     gs.encryption_key = None
@@ -1278,8 +1311,29 @@ def build_gate_ui() -> None:
     form.pack(pady=12, padx=12)
     form.grid_columnconfigure(1, weight=1)
     users_list = users or ["admin"]
-    who_var = tk.StringVar(value=get_active_user(settings) or users_list[0])
+    preferred_user = get_active_user(settings)
+    if not preferred_user or preferred_user not in users_list:
+        if remembered_info and remembered_info[0] in users_list:
+            preferred_user = remembered_info[0]
+        else:
+            preferred_user = users_list[0]
+    who_var = tk.StringVar(value=preferred_user)
     password_login = tk.StringVar(value="")
+    def has_valid_remember(user: str) -> bool:
+        record = ensure_users_bucket(settings).get(user, {})
+        if not isinstance(record, dict):
+            return False
+        try:
+            expiry_value = float(record.get("remember_expires", 0))
+        except Exception:
+            expiry_value = 0.0
+        return bool(record.get("remember_key") and expiry_value > time.time())
+
+    remember_var = tk.BooleanVar(value=has_valid_remember(preferred_user))
+    def on_user_select(*_args) -> None:
+        remember_var.set(has_valid_remember(who_var.get().strip()))
+
+    who_var.trace_add("write", on_user_select)
     ctk.CTkLabel(form, text="User", text_color=TEXT, font=FONT_UI).grid(
         row=0, column=0, padx=8, pady=8, sticky="w"
     )
@@ -1306,8 +1360,23 @@ def build_gate_ui() -> None:
     )
     password_entry.grid(row=1, column=1, padx=8, pady=8, sticky="we")
     gs.login_password_entry = password_entry
+    remember_box = ctk.CTkCheckBox(
+        form,
+        text="Remember me on this device for 30 days",
+        variable=remember_var,
+        text_color=TEXT,
+        fg_color=ACCENT,
+        hover_color=ACCENT_HOVER,
+        font=FONT_UI,
+    )
+    remember_box.grid(row=2, column=0, columnspan=2, padx=8, pady=(0, 4), sticky="w")
+
+    def _focus_login_password() -> None:
+        if password_entry.winfo_exists():
+            password_entry.focus_force()
+
     if gs.root:
-        gs.root.after(100, lambda: password_entry.focus_force())
+        gs.root.after(100, _focus_login_password)
 
     def handle_login() -> None:
         settings_local = load_settings()
@@ -1341,6 +1410,11 @@ def build_gate_ui() -> None:
             return
         gs.encryption_key = key
         gs.pending_user = username
+        if remember_var.get():
+            expires_at = time.time() + 30 * 24 * 60 * 60
+            set_remember_me(settings_local, username, key, expires_at)
+        else:
+            clear_remember_me(settings_local, username)
         set_active_user(settings_local, username)
         password_login.set("")
         if bool(record.get("disclaimer_ack")):
@@ -1383,10 +1457,23 @@ def build_gate_ui() -> None:
             ensure_encryption_metadata(settings_local, user)
         gs.current_user = user
         gs.pending_user = None
-        Path("models").mkdir(parents=True, exist_ok=True)
-        Path("history").mkdir(parents=True, exist_ok=True)
-        Path("outputs").mkdir(parents=True, exist_ok=True)
-        ensure_user_dirs()
+        try:
+            Path("models").mkdir(parents=True, exist_ok=True)
+            Path("history").mkdir(parents=True, exist_ok=True)
+            Path("outputs").mkdir(parents=True, exist_ok=True)
+            ensure_user_dirs()
+        except PermissionError:
+            messagebox.showerror(
+                "Permission Denied",
+                "Unable to create required directories. Please check file permissions."
+            )
+            return
+        except Exception as e:
+            messagebox.showerror(
+                "Error",
+                f"Failed to create directories: {e}"
+            )
+            return
         try:
             if gs.gate_frame:
                 gs.gate_frame.destroy()
@@ -1477,7 +1564,21 @@ def build_gate_ui() -> None:
         font=FONT_BOLD,
         command=back_to_auth,
     ).pack(pady=(0, 12))
-    show_frame(gs.setup_frame if first_run else gs.login_frame)
+
+    if remember_ready:
+        set_active_user(settings, remember_ready[0])
+        gs.pending_user = remember_ready[0]
+        gs.encryption_key = remember_ready[1]
+        complete_login(mark_ack=False)
+        return
+
+    target_frame = gs.setup_frame if first_run else gs.login_frame
+    if remember_pending:
+        set_active_user(settings, remember_pending[0])
+        gs.pending_user = remember_pending[0]
+        gs.encryption_key = remember_pending[1]
+        target_frame = gs.disc_frame
+    show_frame(target_frame)
 
 
 def on_close() -> None:
@@ -1488,7 +1589,67 @@ def on_close() -> None:
         gs.root.destroy()
 
 
+def _check_display_server() -> tuple[bool, Optional[str]]:
+    import os
+    import sys
+    import subprocess
+    import shutil
+
+    if sys.platform == "darwin" or sys.platform == "win32":
+        return True, None
+
+    def _display_is_available() -> bool:
+        try:
+            result = subprocess.run(
+                ["xdpyinfo"],
+                timeout=2,
+                stderr=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+            )
+            return result.returncode == 0
+        except subprocess.TimeoutExpired:
+            return False
+        except (FileNotFoundError, OSError):
+            # If xdpyinfo is missing we assume the display might still be fine.
+            return True
+
+    if os.environ.get("DISPLAY") and _display_is_available():
+        return True, None
+
+    xvfb_path = shutil.which("Xvfb")
+    if xvfb_path:
+        target_display = ":99"
+        try:
+            subprocess.Popen(
+                [xvfb_path, target_display, "-screen", "0", "1024x768x24"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            time.sleep(0.3)
+            os.environ["DISPLAY"] = target_display
+        except OSError as exc:
+            return False, f"Failed to start Xvfb automatically: {exc}. GUI requires X11 display server."
+
+        if _display_is_available():
+            return True, None
+        return False, "Attempted to start Xvfb automatically, but X server is still not accessible."
+
+    if not os.environ.get("DISPLAY"):
+        return False, "DISPLAY environment variable is not set and Xvfb is not installed. GUI requires X11 display server."
+
+    return False, "X server is not accessible. Please start X server or install Xvfb for headless mode."
+
+
 def run_app() -> None:
+    display_ok, display_error = _check_display_server()
+    if not display_ok:
+        import sys
+        print(f"ERROR: {display_error}", file=sys.stderr)
+        print("TIP: For headless Linux systems, use Xvfb:", file=sys.stderr)
+        print("  Xvfb :99 -screen 0 1024x768x24 &", file=sys.stderr)
+        print("  export DISPLAY=:99", file=sys.stderr)
+        sys.exit(1)
+    
     prefs = get_prefs()
     ctk.set_appearance_mode("dark")
     ctk.set_default_color_theme("blue")

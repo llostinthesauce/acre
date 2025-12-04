@@ -74,6 +74,38 @@ from .ui_helpers import apply_native_font_scale, update_logo_visibility, update_
 from .utils import open_path, to_float, to_int
 
 
+def _refresh_theme_vars() -> None:
+    # Rebind theme-dependent globals from constants so theme switches apply to rebuilt widgets.
+    from . import constants as c
+    g = globals()
+    for name in [
+        "ACCENT",
+        "ACCENT_HOVER",
+        "BG_GRAD_TOP",
+        "BG_LIST",
+        "BORDER_ACCENT",
+        "CONTROL_BG",
+        "CONTROL_BORDER",
+        "CRITICAL",
+        "CRITICAL_HOVER",
+        "GLASS_BG",
+        "MUTED",
+        "PANEL_ELEVATED",
+        "SURFACE_ELEVATED",
+        "SURFACE_HOVER",
+        "SURFACE_PRIMARY",
+        "SUCCESS",
+        "SUCCESS_HOVER",
+        "TEXT",
+        "TITLE_BAR_ACCENT",
+        "TITLE_BAR_COLOR",
+    ]:
+        try:
+            g[name] = getattr(c, name)
+        except Exception:
+            pass
+
+
 def _clear_all_histories() -> None:
     base = Path("history") / (gs.current_user or "")
     if not base.exists():
@@ -288,16 +320,16 @@ def teardown_main_ui() -> None:
     gs.user_label = None
 
 
-def _make_settings_card(parent: ctk.CTkFrame, title: str, blurb: str) -> ctk.CTkFrame:
+def _make_settings_card(parent: ctk.CTkFrame, title: str, blurb: str, *, title_font=FONT_H2, blurb_font=FONT_UI) -> ctk.CTkFrame:
     card = ctk.CTkFrame(parent, fg_color=GLASS_BG, corner_radius=RADIUS_MD)
     card.pack(fill="x", padx=4, pady=6)
     ctk.CTkLabel(
-        card, text=title, font=FONT_H2, text_color=TEXT, anchor="w"
+        card, text=title, font=title_font, text_color=TEXT, anchor="w"
     ).pack(anchor="w", padx=16, pady=(12, 4))
     ctk.CTkLabel(
         card,
         text=blurb,
-        font=FONT_UI,
+        font=blurb_font,
         text_color=MUTED,
         wraplength=540,
         justify="left",
@@ -315,12 +347,23 @@ def render_settings_tab(tab) -> None:
         widget.destroy()
 
     prefs = get_prefs()
+    scale = prefs.get("text_scale", prefs["ui_scale"])
+
+    def _scale_font(font_tuple):
+        family, size, *rest = font_tuple
+        new_size = max(8, int(size * scale))
+        return (family, new_size, *rest)
+
+    font_ui = _scale_font(FONT_UI)
+    font_bold = _scale_font(FONT_BOLD)
+    font_h1 = _scale_font(FONT_H1)
+    font_h2 = _scale_font(FONT_H2)
 
     scroll = ctk.CTkScrollableFrame(tab, fg_color="transparent")
     scroll.pack(fill="both", expand=True, padx=12, pady=12)
 
     ctk.CTkLabel(
-        scroll, text="Settings", font=FONT_H1, text_color=TEXT
+        scroll, text="Settings", font=font_h1, text_color=TEXT
     ).pack(anchor="w", padx=4, pady=(4, 2))
 
     ctk.CTkLabel(
@@ -329,7 +372,7 @@ def render_settings_tab(tab) -> None:
             "Tune how ACRE behaves. Each section explains what the controls do "
             "so you can make changes with confidence."
         ),
-        font=FONT_UI,
+        font=font_ui,
         text_color=MUTED,
         wraplength=560,
         justify="left",
@@ -339,6 +382,8 @@ def render_settings_tab(tab) -> None:
         scroll,
         "Appearance",
         "Pick a color theme and text size. Changes apply immediately and are saved for next time.",
+        title_font=font_h2,
+        blurb_font=font_ui,
     )
 
     current_theme = prefs.get("theme", "Blue")
@@ -350,14 +395,16 @@ def render_settings_tab(tab) -> None:
         except Exception:
             pass
         switch_theme(choice)
+        _refresh_theme_vars()
         if gs.root:
             recolor_whole_app(gs.root)
         update_status(f"Theme set to {choice}")
+        refresh_main_ui()
 
     row = ctk.CTkFrame(appearance_body, fg_color="transparent")
     row.pack(fill="x", pady=(0, 6))
 
-    ctk.CTkLabel(row, text="Theme", font=FONT_UI).grid(
+    ctk.CTkLabel(row, text="Theme", font=font_ui).grid(
         row=0, column=0, padx=(0, 8), sticky="w"
     )
 
@@ -365,8 +412,8 @@ def render_settings_tab(tab) -> None:
         row,
         values=list(THEMES.keys()),
         variable=theme_var,
-        font=FONT_UI,
-        dropdown_font=FONT_UI,
+        font=font_ui,
+        dropdown_font=font_ui,
         fg_color=CONTROL_BG,
         button_color=ACCENT,
         button_hover_color=ACCENT_HOVER,
@@ -380,7 +427,7 @@ def render_settings_tab(tab) -> None:
 
     ui_text_row = ctk.CTkFrame(appearance_body, fg_color="transparent")
     ui_text_row.pack(fill="x", pady=(6, 4))
-    ctk.CTkLabel(ui_text_row, text="App text size", font=FONT_UI).grid(
+    ctk.CTkLabel(ui_text_row, text="App text size", font=font_ui).grid(
         row=0, column=0, padx=(0, 8), sticky="w"
     )
     ctk.CTkSlider(
@@ -398,7 +445,7 @@ def render_settings_tab(tab) -> None:
 
     chat_text_row = ctk.CTkFrame(appearance_body, fg_color="transparent")
     chat_text_row.pack(fill="x", pady=(6, 4))
-    ctk.CTkLabel(chat_text_row, text="Chat text size", font=FONT_UI).grid(
+    ctk.CTkLabel(chat_text_row, text="Chat text size", font=font_ui).grid(
         row=0, column=0, padx=(0, 8), sticky="w"
     )
     ctk.CTkSlider(
@@ -428,8 +475,10 @@ def render_settings_tab(tab) -> None:
         "Text Responses",
         "Adjust how the chat responds. Lower temperatures stick to the facts, higher values let the model improvise. "
         "Token limits cap reply length (roughly 3–4 tokens per word).",
+        title_font=font_h2,
+        blurb_font=font_ui,
     )
-    ctk.CTkLabel(text_body, text="Temperature", font=FONT_UI).pack(
+    ctk.CTkLabel(text_body, text="Temperature", font=font_ui).pack(
         anchor="w", pady=(0, 4)
     )
     ctk.CTkSlider(
@@ -444,7 +493,7 @@ def render_settings_tab(tab) -> None:
         button_hover_color=ACCENT_HOVER,
     ).pack(fill="x", pady=(0, 8))
 
-    ctk.CTkLabel(text_body, text="Max new tokens", font=FONT_UI).pack(
+    ctk.CTkLabel(text_body, text="Max new tokens", font=font_ui).pack(
         anchor="w", pady=(0, 4)
     )
     ctk.CTkEntry(text_body, textvariable=max_tokens_var).pack(fill="x", pady=(0, 12))
@@ -462,12 +511,14 @@ def render_settings_tab(tab) -> None:
         "Image Generation",
         "Choose default canvas size and diffusion behaviour. More steps and guidance make sharper images, "
         "but they take longer. Leave the seed blank for fresh randomness every run.",
+        title_font=font_h2,
+        blurb_font=font_ui,
     )
     for label, var in [("Width", width_var), ("Height", height_var)]:
-        ctk.CTkLabel(image_body, text=label, font=FONT_UI).pack(anchor="w", pady=(0, 4))
+        ctk.CTkLabel(image_body, text=label, font=font_ui).pack(anchor="w", pady=(0, 4))
         ctk.CTkEntry(image_body, textvariable=var).pack(fill="x", pady=(0, 8))
 
-    ctk.CTkLabel(image_body, text="Steps", font=FONT_UI).pack(anchor="w", pady=(0, 4))
+    ctk.CTkLabel(image_body, text="Steps", font=font_ui).pack(anchor="w", pady=(0, 4))
     ctk.CTkSlider(
         image_body,
         from_=1,
@@ -480,7 +531,7 @@ def render_settings_tab(tab) -> None:
         button_hover_color=ACCENT_HOVER,
     ).pack(fill="x", pady=(0, 8))
 
-    ctk.CTkLabel(image_body, text="Guidance", font=FONT_UI).pack(
+    ctk.CTkLabel(image_body, text="Guidance", font=font_ui).pack(
         anchor="w", pady=(0, 4)
     )
     ctk.CTkSlider(
@@ -495,7 +546,7 @@ def render_settings_tab(tab) -> None:
         button_hover_color=ACCENT_HOVER,
     ).pack(fill="x", pady=(0, 8))
 
-    ctk.CTkLabel(image_body, text="Seed (blank = random)", font=FONT_UI).pack(
+    ctk.CTkLabel(image_body, text="Seed (blank = random)", font=font_ui).pack(
         anchor="w", pady=(0, 4)
     )
     ctk.CTkEntry(image_body, textvariable=seed_var).pack(fill="x", pady=(0, 8))
@@ -509,12 +560,14 @@ def render_settings_tab(tab) -> None:
         "Interface & Performance",
         "Pick where heavy lifting happens and how big the UI renders. History keeps past chats per model "
         "for richer context—turn it off to keep sessions lighter.",
+        title_font=font_h2,
+        blurb_font=font_ui,
     )
 
     device_row = ctk.CTkFrame(interface_body, fg_color="transparent")
     device_row.pack(fill="x", pady=(0, 10))
 
-    ctk.CTkLabel(device_row, text="Device preference", font=FONT_UI).grid(
+    ctk.CTkLabel(device_row, text="Device preference", font=font_ui).grid(
         row=0, column=0, padx=(0, 8), sticky="w"
     )
 
@@ -522,8 +575,8 @@ def render_settings_tab(tab) -> None:
         device_row,
         values=["auto", "mps", "cuda", "cpu"],
         variable=device_var,
-        font=FONT_UI,
-        dropdown_font=FONT_UI,
+        font=font_ui,
+        dropdown_font=font_ui,
         fg_color=CONTROL_BG,
         text_color=TEXT,
         button_color=ACCENT,
@@ -533,7 +586,7 @@ def render_settings_tab(tab) -> None:
 
     scale_row = ctk.CTkFrame(interface_body, fg_color="transparent")
     scale_row.pack(fill="x", pady=(0, 10))
-    ctk.CTkLabel(scale_row, text="UI scale", font=FONT_UI).grid(
+    ctk.CTkLabel(scale_row, text="UI scale", font=font_ui).grid(
         row=0, column=0, padx=(0, 8), sticky="w"
     )
     ctk.CTkSlider(
@@ -545,13 +598,13 @@ def render_settings_tab(tab) -> None:
         interface_body,
         text="Enable history (per-model, per-user)",
         variable=history_var,
-        font=FONT_UI,
+        font=font_ui,
     ).pack(anchor="w", pady=(0, 4))
 
     ctk.CTkLabel(
         interface_body,
         text="Offline mode is always on so nothing leaves this machine.",
-        font=FONT_UI,
+        font=font_ui,
         text_color=MUTED,
     ).pack(anchor="w", pady=(4, 0))
 
@@ -559,6 +612,8 @@ def render_settings_tab(tab) -> None:
         scroll,
         "Shortcuts",
         "Quick maintenance buttons. Use them to tidy files or free GPU memory without leaving the app.",
+        title_font=font_h2,
+        blurb_font=font_ui,
     )
     button_row = ctk.CTkFrame(tools_body, fg_color="transparent")
     button_row.pack(fill="x", pady=(0, 6))
@@ -566,7 +621,7 @@ def render_settings_tab(tab) -> None:
         button_row,
         text="Open outputs",
         command=lambda: open_path(OUTPUTS_PATH / (gs.current_user or "")),
-        font=FONT_BOLD,
+        font=font_bold,
         corner_radius=BUTTON_RADIUS,
         fg_color=ACCENT,
         hover_color=ACCENT_HOVER,
@@ -576,7 +631,7 @@ def render_settings_tab(tab) -> None:
         button_row,
         text="Open models",
         command=lambda: open_path(Path("models")),
-        font=FONT_BOLD,
+        font=font_bold,
         corner_radius=BUTTON_RADIUS,
         fg_color=ACCENT,
         hover_color=ACCENT_HOVER,
@@ -590,7 +645,7 @@ def render_settings_tab(tab) -> None:
         fg_color=CRITICAL,
         hover_color=CRITICAL_HOVER,
         text_color="white",
-        font=FONT_BOLD,
+        font=font_bold,
     ).grid(row=0, column=2, padx=4, pady=6, sticky="we")
     ctk.CTkButton(
         button_row,
@@ -600,7 +655,7 @@ def render_settings_tab(tab) -> None:
         fg_color=TITLE_BAR_ACCENT,
         hover_color=ACCENT_HOVER,
         text_color="white",
-        font=FONT_BOLD,
+        font=font_bold,
     ).grid(row=0, column=3, padx=4, pady=6, sticky="we")
     for column in range(4):
         button_row.grid_columnconfigure(column, weight=1)
@@ -609,6 +664,8 @@ def render_settings_tab(tab) -> None:
         scroll,
         "Diagnostics",
         "Copies of library versions so you can verify what shipped with this build.",
+        title_font=font_h2,
+        blurb_font=font_ui,
     )
     try:
         import platform
@@ -637,7 +694,7 @@ def render_settings_tab(tab) -> None:
             corner_radius=RADIUS_SM,
             fg_color=SURFACE_PRIMARY,
             text_color=TEXT,
-            font=FONT_UI,
+            font=font_ui,
             wrap="word",
             height=160,
         )
@@ -648,7 +705,7 @@ def render_settings_tab(tab) -> None:
         ctk.CTkLabel(
             diag_body,
             text="Unable to gather diagnostics on this platform.",
-            font=FONT_UI,
+            font=font_ui,
             text_color=MUTED,
         ).pack(anchor="w")
 
@@ -701,6 +758,7 @@ def render_settings_tab(tab) -> None:
 
         update_status("Settings saved.")
         render_settings_tab(tab)
+        refresh_main_ui()
 
     ctk.CTkButton(
         scroll,
@@ -709,13 +767,13 @@ def render_settings_tab(tab) -> None:
         fg_color=ACCENT,
         hover_color=ACCENT_HOVER,
         text_color="white",
-        font=FONT_BOLD,
+        font=font_bold,
         corner_radius=BUTTON_RADIUS,
     ).pack(pady=(16, 20))
     ctk.CTkLabel(
         scroll,
         text="Made with <3 at the University of Missouri",
-        font=FONT_UI,
+        font=font_ui,
         text_color=MUTED,
     ).pack(pady=(0, 16))
 
@@ -736,6 +794,7 @@ def open_settings() -> None:
 
 
 def build_main_ui() -> None:
+    _refresh_theme_vars()
     settings = load_settings()
     history_dir = str(Path("history") / gs.current_user) if gs.current_user else "history"
     prefs = get_prefs()
@@ -750,11 +809,12 @@ def build_main_ui() -> None:
 
     from model_manager import ModelManager
 
-    gs.mgr = ModelManager(
-        models_dir=str(Path("models")),
-        history_dir=history_dir,
-        device_pref=prefs["device_preference"],
-    )
+    if gs.mgr is None:
+        gs.mgr = ModelManager(
+            models_dir=str(Path("models")),
+            history_dir=history_dir,
+            device_pref=prefs["device_preference"],
+        )
     if gs.encryption_key:
         try:
             encryptor = ChatEncryptor(gs.encryption_key)
@@ -1149,7 +1209,28 @@ def build_main_ui() -> None:
     gs.settings_btn.lift()
     refresh_list()
     render_history()
-    update_status("No model loaded")
+    if gs.mgr and gs.mgr.is_loaded():
+        try:
+            update_status(gs.mgr.describe_session())
+        except Exception:
+            update_status("Model loaded")
+    else:
+        update_status("No model loaded")
+
+
+def refresh_main_ui() -> None:
+    # Rebuild the main UI to apply theme/font changes without touching the model manager.
+    if gs.workspace_frame is None:
+        return
+    _refresh_theme_vars()
+    teardown_main_ui()
+    build_main_ui()
+    try:
+        if gs.root:
+            gs.root.configure(fg_color=BG_GRAD_TOP)
+            recolor_whole_app(gs.root)
+    except Exception:
+        pass
 
 
 def show_frame(frame) -> None:

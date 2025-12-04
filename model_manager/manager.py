@@ -53,18 +53,21 @@ class ModelManager:
 
     def list_models(self) -> List[str]:
         output: List[str] = []
+        on_jetson = is_jetson()
         for item in sorted(self._models_dir.iterdir()):
             if item.is_file() and item.suffix.lower() in self.SUPPORTED_EXTENSIONS:
                 output.append(item.name)
             elif item.is_dir():
-                if any((child.is_file() and child.suffix.lower() in self.SUPPORTED_EXTENSIONS for child in item.iterdir())):
+                has_gguf = any((child.is_file() and child.suffix.lower() in self.SUPPORTED_EXTENSIONS for child in item.iterdir()))
+                if has_gguf:
                     output.append(item.name)
-                elif (item / 'model_index.json').exists():
-                    output.append(item.name)
-                elif (item / 'quantize_config.json').exists():
-                    output.append(item.name)
-                elif (item / 'config.json').exists():
-                    output.append(item.name)
+                elif not on_jetson:
+                    if (item / 'model_index.json').exists():
+                        output.append(item.name)
+                    elif (item / 'quantize_config.json').exists():
+                        output.append(item.name)
+                    elif (item / 'config.json').exists():
+                        output.append(item.name)
         return output
 
     def _suggest_llama_gpu_layers(self, pref: str) -> Optional[int]:
@@ -73,6 +76,8 @@ class ModelManager:
             return 0
         if pref in ('cuda', 'mps'):
             return -1
+        if is_jetson():
+            return 0
         try:
             import torch
             if torch.cuda.is_available() or (hasattr(torch.backends, 'mps') and torch.backends.mps.is_available()):
@@ -86,10 +91,17 @@ class ModelManager:
                 return -1
         except Exception:
             pass
-        if is_jetson():
-            return -1
         return 0
     def _detect_directory_backend(self, directory: Path) -> Optional[Tuple[str, Path, str]]:
+        if is_jetson():
+            first_gguf = next(
+                (f for f in sorted(directory.iterdir())
+                 if f.is_file() and f.suffix.lower() in self.SUPPORTED_EXTENSIONS),
+                None,
+            )
+            if first_gguf:
+                return ('llama_cpp', first_gguf, 'text')
+            raise ValueError('On Jetson, only GGUF/GGML models are supported. Convert this model to GGUF for llama.cpp.')
         first_gguf = next(
             (f for f in sorted(directory.iterdir())
              if f.is_file() and f.suffix.lower() in self.SUPPORTED_EXTENSIONS),
@@ -176,6 +188,8 @@ class ModelManager:
             backend = self._detect_directory_backend(candidate)
             if backend:
                 return backend
+        if is_jetson():
+            raise ValueError('On Jetson, only GGUF/GGML models are supported. Convert the model to GGUF for llama.cpp.')
         raise ValueError(f'Unsupported model: {candidate}')
 
     def load_model(self, name: str, *, device_pref: Optional[str]=None) -> Tuple[bool, str]:

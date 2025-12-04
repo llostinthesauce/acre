@@ -128,6 +128,8 @@ def setup_environment() -> None:
         pass
     
     on_jetson = is_jetson()
+    if on_jetson:
+        os.environ.setdefault("CUDA_VISIBLE_DEVICES", "-1")
     arm64_linux = is_arm64_linux()
     if arm64_linux and not on_jetson:
         print("WARNING: Detected ARM64 Linux system. PyTorch must be installed manually.")

@@ -117,7 +117,7 @@ def get_prefs() -> dict:
         "device_preference": str(prefs.get("device_preference", "auto")).lower(),
         "history_enabled": bool(prefs.get("history_enabled", True)),
         "theme": str(prefs.get("theme", "Blue")),
-                "text_scale": float(prefs.get("text_scale", prefs.get("ui_scale", 1.15))),
+        "text_scale": float(prefs.get("text_scale", prefs.get("ui_scale", 1.15))),
     }
 
 

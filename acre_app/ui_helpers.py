@@ -17,25 +17,11 @@ def apply_native_font_scale(scale: float) -> None:
             gs.native_tk_font = tkfont.Font(family="TkDefaultFont", size=size)
         except Exception:
             gs.native_tk_font = tkfont.Font(size=size)
-    
     if gs.listbox is not None:
         try:
             gs.listbox.configure(font=gs.native_tk_font)
         except Exception:
             pass
-    if gs.entry is not None:
-        try:
-            gs.entry.configure(font=gs.native_tk_font)
-        except Exception:
-            pass
-    if gs.chat_history is not None:
-        try:
-            gs.chat_history.configure(font=(FONT_FAMILY, max(10, int(BASE_UI * scale))))
-        except Exception:
-            try:
-                gs.chat_history.configure(font=("TkDefaultFont", max(10, int(BASE_UI * scale))))
-            except Exception:
-                pass
 
 
 def update_status(message: str) -> None:

@@ -103,6 +103,47 @@ class ModelManager:
             return ('auto_gptq', directory, 'text')
         if (directory / 'adapter_config.json').exists():
             return ('transformers', directory, 'text')
+
+        def looks_like_mlx() -> bool:
+            config_path = directory / 'config.json'
+            if not config_path.exists():
+                return False
+            try:
+                config_data = json.loads(config_path.read_text())
+            except Exception:
+                config_data = {}
+            name_lower = directory.name.lower()
+            if 'mlx' in name_lower:
+                return True
+            quant_info = str(config_data.get('quantization_config', {})).lower()
+            if 'mlx' in quant_info:
+                return True
+            library_name = str(config_data.get('library_name', '')).lower()
+            if library_name == 'mlx':
+                return True
+            readme_path = directory / 'README.md'
+            if readme_path.exists():
+                try:
+                    readme_text = readme_path.read_text(errors='ignore').lower()
+                    if ('library_name: mlx' in readme_text) or ('mlx-community' in readme_text) or '\n- mlx' in readme_text:
+                        return True
+                except Exception:
+                    pass
+            index_path = directory / 'model.safetensors.index.json'
+            if index_path.exists():
+                try:
+                    index = json.loads(index_path.read_text())
+                    weight_map = index.get('weight_map') or {}
+                    if any(key.endswith('.scales') for key in weight_map.keys()):
+                        return True
+                except Exception:
+                    pass
+            return False
+
+        if looks_like_mlx():
+            if is_jetson():
+                raise ValueError('MLX models are not supported on Jetson. Use GGUF or Transformers models.')
+            return ('mlx_lm', directory, 'text')
         config_path = directory / 'config.json'
         if not config_path.exists():
             return None

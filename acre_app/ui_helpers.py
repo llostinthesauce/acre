@@ -2,17 +2,8 @@ import tkinter as tk
 import tkinter.font as tkfont
 
 from . import global_state as gs
-from .constants import (
-    BASE_UI,
-    FONT_FAMILY,
-    BG_GRAD_TOP,
-    BG_LIST,
-    HL_LIST,
-    TEXT,
-    MUTED,
-    CONTROL_BG,
-    SURFACE_PRIMARY,
-)
+from . import constants as c
+from .constants import BASE_UI, FONT_FAMILY
 
 def apply_native_font_scale(scale: float) -> None:
     size = max(10, int(BASE_UI * scale))
@@ -93,19 +84,19 @@ def recolor_whole_app(root: tk.Misc):
 
     try:
         try:
-            root.configure(fg_color=BG_GRAD_TOP)
+            root.configure(fg_color=c.BG_GRAD_TOP)
         except Exception:
-            root.configure(bg=BG_GRAD_TOP)
+            root.configure(bg=c.BG_GRAD_TOP)
     except Exception:
         pass
 
     if gs.listbox is not None:
         try:
             gs.listbox.configure(
-                bg=BG_LIST,
-                fg=TEXT,
-                selectbackground=HL_LIST,
-                selectforeground=TEXT,
+                bg=c.BG_LIST,
+                fg=c.TEXT,
+                selectbackground=c.HL_LIST,
+                selectforeground=c.TEXT,
                 highlightthickness=0,
                 bd=0,
                 relief="flat",
@@ -116,9 +107,9 @@ def recolor_whole_app(root: tk.Misc):
     if gs.entry is not None:
         try:
             gs.entry.configure(
-                bg=CONTROL_BG,
-                fg=MUTED,
-                insertbackground=TEXT,
+                bg=c.CONTROL_BG,
+                fg=c.MUTED,
+                insertbackground=c.TEXT,
                 highlightthickness=0,
                 bd=0,
                 relief="flat",
@@ -128,7 +119,7 @@ def recolor_whole_app(root: tk.Misc):
 
     if gs.logo_label is not None:
         try:
-            gs.logo_label.configure(bg=SURFACE_PRIMARY)
+            gs.logo_label.configure(bg=c.SURFACE_PRIMARY)
         except Exception:
             pass
 

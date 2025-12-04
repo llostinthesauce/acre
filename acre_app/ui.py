@@ -148,43 +148,88 @@ def _run_perf_test() -> None:
     if not gs.mgr:
         messagebox.showerror("Error", "Model manager not initialized.")
         return
-    model_path = Path("models") / "tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf"
-    if not model_path.exists():
-        messagebox.showerror("Model missing", f"Expected test model at {model_path}.")
-        return
 
-    update_status("Running performance test (see terminal for details)...")
+    update_status("Running tiered performance test (see terminal for details)...")
 
     def worker():
         try:
-            stats = gs.mgr.run_perf_test(
-                model_path=model_path,
-                max_tokens=128,
-                n_ctx=1024,
+            tiers = [
+                {"n_ctx": 512, "max_tokens": 64},
+                {"n_ctx": 1024, "max_tokens": 128},
+                {"n_ctx": 2048, "max_tokens": 256},
+            ]
+            results = gs.mgr.run_perf_test_tiered(tiers=tiers)
+            if not results:
+                raise RuntimeError("No results returned from perf test.")
+
+            def fmt(value: object, width: int) -> str:
+                return str(value).rjust(width)
+
+            def fmt_float(value: object, width: int, precision: int = 2) -> str:
+                if isinstance(value, (int, float)):
+                    return f"{value:.{precision}f}".rjust(width)
+                return "n/a".rjust(width)
+
+            header = "=== Performance Test (TinyLlama tiered) ==="
+            first = results[0]
+            print(header, flush=True)
+            print(
+                f"model: {first.get('model')} | threads: {first.get('n_threads')} | n_gpu_layers: {first.get('n_gpu_layers')}",
+                flush=True,
             )
-            eval_tps_val = stats.get("eval_tps")
-            prompt_tps_val = stats.get("prompt_tps")
-            eval_tps = f"{eval_tps_val:.2f}" if isinstance(eval_tps_val, (int, float)) and eval_tps_val > 0 else "n/a"
-            prompt_tps = f"{prompt_tps_val:.2f}" if isinstance(prompt_tps_val, (int, float)) and prompt_tps_val > 0 else "n/a"
-            rss_delta = stats.get("rss_delta_mb")
-            rss_delta_str = f"{rss_delta:.2f} MB" if isinstance(rss_delta, (int, float)) else "n/a"
-            vram_peak = stats.get("vram_mb", {}).get("max") if isinstance(stats.get("vram_mb"), dict) else None
-            vram_peak_str = f"{vram_peak:.2f} MB" if isinstance(vram_peak, (int, float)) else "n/a"
-            power_avg = stats.get("power_w", {}).get("avg") if isinstance(stats.get("power_w"), dict) else None
-            power_avg_str = f"{power_avg:.2f} W" if isinstance(power_avg, (int, float)) else "n/a"
-            cpu_peak = stats.get("cpu_proc_pct", {}).get("max") if isinstance(stats.get("cpu_proc_pct"), dict) else None
-            cpu_peak_str = f"{cpu_peak:.1f}%" if isinstance(cpu_peak, (int, float)) else "n/a"
-            msg = (
-                f"[perf] model={stats.get('model')} n_ctx={stats.get('n_ctx')} "
-                f"ngl={stats.get('n_gpu_layers')} threads={stats.get('n_threads')} "
-                f"load_s={stats.get('load_s'):.3f} infer_s={stats.get('infer_s'):.3f} "
-                f"tokens={stats.get('completion_tokens')} "
-                f"eval_tps={eval_tps} prompt_tps={prompt_tps} "
-                f"rss_delta={rss_delta_str} vram_peak={vram_peak_str} "
-                f"power_avg={power_avg_str} cpu_peak={cpu_peak_str}"
-            )
-            print(msg, flush=True)
-            update_status("Performance test complete (details printed to terminal).")
+            columns = [
+                ("pass", 5),
+                ("ctx", 6),
+                ("max", 5),
+                ("load_s", 9),
+                ("infer_s", 9),
+                ("tokens", 8),
+                ("eval_tps", 10),
+                ("prompt_tps", 12),
+                ("rssΔ_MB", 10),
+                ("vram_MB", 12),
+                ("power_W", 10),
+                ("cpu_peak", 10),
+            ]
+            header_row = " ".join(col[0].rjust(col[1]) for col in columns)
+            print(header_row, flush=True)
+            print("-" * len(header_row), flush=True)
+
+            vram_notes = set()
+            for stats in results:
+                eval_tps = stats.get("eval_tps")
+                prompt_tps = stats.get("prompt_tps")
+                rss_delta = stats.get("rss_delta_mb")
+                vram_peak = stats.get("vram_mb", {}).get("max") if isinstance(stats.get("vram_mb"), dict) else None
+                vram_reason = stats.get("vram_reason")
+                if vram_reason:
+                    vram_notes.add(vram_reason)
+                power_avg = stats.get("power_w", {}).get("avg") if isinstance(stats.get("power_w"), dict) else None
+                cpu_peak = stats.get("cpu_proc_pct", {}).get("max") if isinstance(stats.get("cpu_proc_pct"), dict) else None
+                tier_idx = stats.get("tier") or 1
+                tier_total = stats.get("tier_total") or len(results)
+                row = " ".join(
+                    [
+                        fmt(f"{tier_idx}/{tier_total}", 5),
+                        fmt(stats.get("n_ctx"), 6),
+                        fmt(stats.get("max_tokens"), 5),
+                        fmt_float(stats.get("load_s"), 9, 3),
+                        fmt_float(stats.get("infer_s"), 9, 3),
+                        fmt(stats.get("completion_tokens"), 8),
+                        fmt_float(eval_tps, 10, 2),
+                        fmt_float(prompt_tps, 12, 2),
+                        fmt_float(rss_delta, 10, 2),
+                        fmt_float(vram_peak, 12, 2) if not vram_reason else fmt("n/a*", 12),
+                        fmt_float(power_avg, 10, 2),
+                        fmt_float(cpu_peak, 10, 1),
+                    ]
+                )
+                print(row, flush=True)
+
+            if vram_notes:
+                print("Notes:", ", ".join(sorted(vram_notes)), flush=True)
+
+            update_status(f"Performance test complete ({len(results)} passes). Details in terminal.")
         except Exception as exc:
             update_status("Performance test failed.")
             messagebox.showerror("Performance test failed", str(exc))

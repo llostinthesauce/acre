@@ -1,10 +1,12 @@
 from __future__ import annotations
 import gc
 import json
+import os
 import re
 import threading
+import time
 from pathlib import Path
-from typing import Any, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from platform_utils import is_jetson
 
 from .backends import ASRBackend, AutoGPTQBackend, BaseBackend, DiffusersT2IBackend, HFBackend, LlamaCppBackend, MLXBackend, OCRBackend, PhiVisionBackend, TTSBackend
@@ -279,6 +281,182 @@ class ModelManager:
 
     def is_asr_backend(self) -> bool:
         return self._kind == 'asr'
+
+    def _current_rss_mb(self) -> float:
+        try:
+            import psutil  # type: ignore
+            return psutil.Process(os.getpid()).memory_info().rss / (1024 * 1024)
+        except Exception:
+            pass
+        try:
+            import resource  # type: ignore
+            rss_kb = getattr(resource.getrusage(resource.RUSAGE_SELF), 'ru_maxrss', 0)
+            if rss_kb:
+                # On Linux ru_maxrss is KB; on macOS it is bytes.
+                return rss_kb / 1024 if rss_kb > 1024 else rss_kb / (1024 * 1024)
+        except Exception:
+            pass
+        return 0.0
+
+    def run_perf_test(self, *, model_path: Optional[Path]=None, prompt: Optional[str]=None, max_tokens: int=64, n_ctx: int=1024) -> Dict[str, Any]:
+        """
+        Run a one-off local generation for metrics (tokens/s, latency, memory deltas).
+        Uses llama.cpp (GGUF) so it works across platforms; respects Jetson CPU-only.
+        """
+        target = Path(model_path) if model_path else self._models_dir / 'tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf'
+        if not target.exists():
+            raise RuntimeError(f'Performance test model not found at {target}')
+        try:
+            from llama_cpp import Llama  # type: ignore
+        except Exception as exc:
+            raise RuntimeError(f'llama_cpp not available: {exc}')
+
+        test_prompt = prompt or "Say one short sentence proving this is a performance test."
+        ngl = self._llama_gpu_layers if self._llama_gpu_layers is not None else -1
+        n_threads = self._llama_threads if self._llama_threads else max(1, (os.cpu_count() or 1))
+
+        stats: Dict[str, Any] = {
+            'model': str(target),
+            'n_ctx': n_ctx,
+            'n_threads': n_threads,
+            'n_gpu_layers': ngl,
+            'max_tokens': max_tokens,
+        }
+
+        rss_before = self._current_rss_mb()
+        stats['rss_before_mb'] = rss_before
+
+        # Optional sampling of CPU/GPU/power while test runs.
+        samples: List[Dict[str, Any]] = []
+        stop_event = threading.Event()
+        proc = None
+        gpu_ctx: Dict[str, Any] = {}
+        try:
+            import psutil  # type: ignore
+            proc = psutil.Process(os.getpid())
+            proc.cpu_percent(None)  # prime
+        except Exception:
+            proc = None
+        try:
+            import pynvml  # type: ignore
+            pynvml.nvmlInit()
+            handle = pynvml.nvmlDeviceGetHandleByIndex(0)
+            gpu_ctx = {'nvml': pynvml, 'handle': handle}
+        except Exception:
+            gpu_ctx = {}
+
+        def sample_once():
+            sample: Dict[str, Any] = {'ts': time.time()}
+            sample['rss_mb'] = self._current_rss_mb()
+            if proc:
+                try:
+                    import psutil  # type: ignore
+                    sample['cpu_proc_pct'] = proc.cpu_percent(interval=None)
+                    sample['cpu_sys_pct'] = psutil.cpu_percent(interval=None)
+                except Exception:
+                    pass
+            if gpu_ctx:
+                try:
+                    nvml = gpu_ctx['nvml']
+                    handle = gpu_ctx['handle']
+                    mem = nvml.nvmlDeviceGetMemoryInfo(handle)
+                    sample['vram_mb'] = mem.used / (1024 * 1024)
+                    try:
+                        power = nvml.nvmlDeviceGetPowerUsage(handle)
+                        sample['power_w'] = power / 1000.0
+                    except Exception:
+                        pass
+                    try:
+                        temp = nvml.nvmlDeviceGetTemperature(handle, nvml.NVML_TEMPERATURE_GPU)
+                        sample['temp_c'] = temp
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
+            samples.append(sample)
+
+        def sampler():
+            while not stop_event.is_set():
+                sample_once()
+                stop_event.wait(0.5)
+
+        sampler_thread = threading.Thread(target=sampler, daemon=True)
+        sampler_thread.start()
+
+        t0 = time.time()
+        llama = Llama(
+            model_path=str(target),
+            n_ctx=n_ctx,
+            n_threads=n_threads,
+            n_gpu_layers=ngl,
+            verbose=False,
+        )
+        load_s = time.time() - t0
+
+        t1 = time.time()
+        result = llama(
+            test_prompt,
+            max_tokens=max_tokens,
+            temperature=0.7,
+            stop=None,
+            echo=False,
+        )
+        infer_s = time.time() - t1
+
+        # Cleanup
+        try:
+            del llama
+        except Exception:
+            pass
+        self.cleanup_memory()
+        rss_after = self._current_rss_mb()
+        stop_event.set()
+        sampler_thread.join(timeout=1.0)
+
+        usage = result.get('usage', {}) if isinstance(result, dict) else {}
+        timings = result.get('timings', {}) if isinstance(result, dict) else {}
+        completion_tokens = usage.get('completion_tokens') or usage.get('completion_tokens', 0)
+        prompt_tokens = usage.get('prompt_tokens')
+        total_tokens = usage.get('total_tokens')
+
+        def _agg(values: List[float]) -> Dict[str, Optional[float]]:
+            if not values:
+                return {'min': None, 'max': None, 'avg': None}
+            return {
+                'min': min(values),
+                'max': max(values),
+                'avg': sum(values) / len(values),
+            }
+
+        cpu_proc = _agg([s.get('cpu_proc_pct') for s in samples if isinstance(s.get('cpu_proc_pct'), (int, float))])
+        cpu_sys = _agg([s.get('cpu_sys_pct') for s in samples if isinstance(s.get('cpu_sys_pct'), (int, float))])
+        vram = _agg([s.get('vram_mb') for s in samples if isinstance(s.get('vram_mb'), (int, float))])
+        power = _agg([s.get('power_w') for s in samples if isinstance(s.get('power_w'), (int, float))])
+        temp = _agg([s.get('temp_c') for s in samples if isinstance(s.get('temp_c'), (int, float))])
+
+        stats.update({
+            'load_s': load_s,
+            'infer_s': infer_s,
+            'total_s': load_s + infer_s,
+            'prompt_tokens': prompt_tokens,
+            'completion_tokens': completion_tokens,
+            'total_tokens': total_tokens,
+            'prompt_tps': timings.get('prompt_per_second') or timings.get('prompt_throughput'),
+            'eval_tps': timings.get('eval_per_second') or timings.get('eval_throughput'),
+            'rss_after_mb': rss_after,
+            'rss_delta_mb': (rss_after - rss_before) if (rss_after and rss_before) else None,
+            'cpu_proc_pct': cpu_proc,
+            'cpu_sys_pct': cpu_sys,
+            'vram_mb': vram,
+            'power_w': power,
+            'temp_c': temp,
+        })
+
+        # Fallback TPS if timings are missing
+        if completion_tokens and infer_s > 0 and not stats.get('eval_tps'):
+            stats['eval_tps'] = completion_tokens / infer_s
+
+        return stats
 
     def is_tts_backend(self) -> bool:
         return self._kind == 'tts'

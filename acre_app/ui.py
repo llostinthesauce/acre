@@ -1,6 +1,7 @@
 import gc
 import os
 import time
+import threading
 import tkinter as tk
 from pathlib import Path
 from tkinter import messagebox
@@ -141,6 +142,54 @@ def _clear_caches() -> None:
         pass
     gc.collect()
     update_status("Caches cleared.")
+
+
+def _run_perf_test() -> None:
+    if not gs.mgr:
+        messagebox.showerror("Error", "Model manager not initialized.")
+        return
+    model_path = Path("models") / "tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf"
+    if not model_path.exists():
+        messagebox.showerror("Model missing", f"Expected test model at {model_path}.")
+        return
+
+    update_status("Running performance test (see terminal for details)...")
+
+    def worker():
+        try:
+            stats = gs.mgr.run_perf_test(
+                model_path=model_path,
+                max_tokens=128,
+                n_ctx=1024,
+            )
+            eval_tps_val = stats.get("eval_tps")
+            prompt_tps_val = stats.get("prompt_tps")
+            eval_tps = f"{eval_tps_val:.2f}" if isinstance(eval_tps_val, (int, float)) and eval_tps_val > 0 else "n/a"
+            prompt_tps = f"{prompt_tps_val:.2f}" if isinstance(prompt_tps_val, (int, float)) and prompt_tps_val > 0 else "n/a"
+            rss_delta = stats.get("rss_delta_mb")
+            rss_delta_str = f"{rss_delta:.2f} MB" if isinstance(rss_delta, (int, float)) else "n/a"
+            vram_peak = stats.get("vram_mb", {}).get("max") if isinstance(stats.get("vram_mb"), dict) else None
+            vram_peak_str = f"{vram_peak:.2f} MB" if isinstance(vram_peak, (int, float)) else "n/a"
+            power_avg = stats.get("power_w", {}).get("avg") if isinstance(stats.get("power_w"), dict) else None
+            power_avg_str = f"{power_avg:.2f} W" if isinstance(power_avg, (int, float)) else "n/a"
+            cpu_peak = stats.get("cpu_proc_pct", {}).get("max") if isinstance(stats.get("cpu_proc_pct"), dict) else None
+            cpu_peak_str = f"{cpu_peak:.1f}%" if isinstance(cpu_peak, (int, float)) else "n/a"
+            msg = (
+                f"[perf] model={stats.get('model')} n_ctx={stats.get('n_ctx')} "
+                f"ngl={stats.get('n_gpu_layers')} threads={stats.get('n_threads')} "
+                f"load_s={stats.get('load_s'):.3f} infer_s={stats.get('infer_s'):.3f} "
+                f"tokens={stats.get('completion_tokens')} "
+                f"eval_tps={eval_tps} prompt_tps={prompt_tps} "
+                f"rss_delta={rss_delta_str} vram_peak={vram_peak_str} "
+                f"power_avg={power_avg_str} cpu_peak={cpu_peak_str}"
+            )
+            print(msg, flush=True)
+            update_status("Performance test complete (details printed to terminal).")
+        except Exception as exc:
+            update_status("Performance test failed.")
+            messagebox.showerror("Performance test failed", str(exc))
+
+    threading.Thread(target=worker, daemon=True).start()
 
 
 def build_title_bar() -> None:
@@ -589,6 +638,44 @@ def render_settings_tab(tab) -> None:
         button_hover_color=ACCENT_HOVER,
         corner_radius=BUTTON_RADIUS,
     ).grid(row=0, column=1, sticky="w")
+
+    ctk.CTkButton(
+        interface_body,
+        text="Run performance test (TinyLlama Q4_K_M)",
+        command=_run_perf_test,
+        fg_color=ACCENT,
+        hover_color=ACCENT_HOVER,
+        text_color="white",
+        font=font_ui,
+        corner_radius=BUTTON_RADIUS,
+    ).pack(anchor="w", pady=(4, 8), padx=4)
+
+    help_body = _make_settings_card(
+        scroll,
+        "Find Models / Help",
+        "Browse community models and downloads.",
+        title_font=font_h2,
+        blurb_font=font_ui,
+    )
+    try:
+        import webbrowser
+        def open_models():
+            try:
+                webbrowser.open("https://huggingface.co/models")
+            except Exception:
+                messagebox.showerror("Error", "Could not open the browser.")
+        ctk.CTkButton(
+            help_body,
+            text="Open Hugging Face Models",
+            command=open_models,
+            fg_color=CONTROL_BG,
+            hover_color=CONTROL_BORDER,
+            text_color=TEXT,
+            font=font_ui,
+            corner_radius=BUTTON_RADIUS,
+        ).pack(anchor="w", pady=(4, 4), padx=4)
+    except Exception:
+        pass
 
     scale_row = ctk.CTkFrame(interface_body, fg_color="transparent")
     scale_row.pack(fill="x", pady=(0, 10))

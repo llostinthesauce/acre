@@ -298,20 +298,51 @@ class ModelManager:
             pass
         return 0.0
 
+    def _resolve_perf_model(self, model_path: Optional[Path]) -> Path:
+        """
+        Locate the TinyLlama perf-test model, supporting both flat and bundled subfolder layouts.
+        """
+        if model_path:
+            target = Path(model_path)
+            if target.exists():
+                return target
+        default_name = 'tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf'
+        direct = self._models_dir / default_name
+        if direct.exists():
+            return direct
+        bundled = self._models_dir / 'TinyLlama-1.1B-Chat-v1.0-GGUF' / default_name
+        if bundled.exists():
+            return bundled
+        for candidate in self._models_dir.rglob(default_name):
+            if candidate.is_file():
+                return candidate
+        raise RuntimeError(
+            f'Performance test model not found. Expected {direct} or bundled copy at {bundled}.'
+        )
+
     def run_perf_test(self, *, model_path: Optional[Path]=None, prompt: Optional[str]=None, max_tokens: int=64, n_ctx: int=1024) -> Dict[str, Any]:
         """
         Run a one-off local generation for metrics (tokens/s, latency, memory deltas).
         Uses llama.cpp (GGUF) so it works across platforms; respects Jetson CPU-only.
         """
-        target = Path(model_path) if model_path else self._models_dir / 'tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf'
-        if not target.exists():
-            raise RuntimeError(f'Performance test model not found at {target}')
+        target = self._resolve_perf_model(model_path)
         try:
             from llama_cpp import Llama  # type: ignore
         except Exception as exc:
             raise RuntimeError(f'llama_cpp not available: {exc}')
 
-        test_prompt = prompt or "Say one short sentence proving this is a performance test."
+        default_prompt = (
+            "Performance test prompt. Answer this question briefly: What factors most affect language model throughput "
+            "on different hardware? Include a note about batch size, context length, GPU memory bandwidth, CPU threading, "
+            "and tokenizer speed. This benchmark measures throughput and latency by running multiple passes with increasing "
+            "context sizes. The content itself is not important; we just need enough prompt tokens to exercise the model "
+            "effectively. "
+        )
+        filler = (
+            "Additional filler text to increase prompt length and exercise prompt-side tokenization and caching behavior. "
+            "Repeat mentions: throughput, latency, context, batch size, GPU, CPU, memory bandwidth. "
+        )
+        test_prompt = prompt or (default_prompt + filler * 6)
         ngl = self._llama_gpu_layers if self._llama_gpu_layers is not None else -1
         n_threads = self._llama_threads if self._llama_threads else max(1, (os.cpu_count() or 1))
 
@@ -331,6 +362,7 @@ class ModelManager:
         stop_event = threading.Event()
         proc = None
         gpu_ctx: Dict[str, Any] = {}
+        vram_reason: Optional[str] = None
         try:
             import psutil  # type: ignore
             proc = psutil.Process(os.getpid())
@@ -344,6 +376,7 @@ class ModelManager:
             gpu_ctx = {'nvml': pynvml, 'handle': handle}
         except Exception:
             gpu_ctx = {}
+            vram_reason = 'nvml_unavailable_or_not_nvidia'
 
         def sample_once():
             sample: Dict[str, Any] = {'ts': time.time()}
@@ -450,13 +483,40 @@ class ModelManager:
             'vram_mb': vram,
             'power_w': power,
             'temp_c': temp,
+            'vram_reason': vram_reason if vram.get('max') is None else None,
         })
 
         # Fallback TPS if timings are missing
         if completion_tokens and infer_s > 0 and not stats.get('eval_tps'):
             stats['eval_tps'] = completion_tokens / infer_s
+        prompt_ms = timings.get('prompt_ms') or timings.get('prompt_ms_total')
+        if prompt_tokens and prompt_ms and prompt_ms > 0 and not stats.get('prompt_tps'):
+            stats['prompt_tps'] = prompt_tokens / (prompt_ms / 1000.0)
 
         return stats
+
+    def run_perf_test_tiered(self, *, model_path: Optional[Path]=None, prompt: Optional[str]=None, tiers: Optional[List[Dict[str, int]]]=None) -> List[Dict[str, Any]]:
+        """
+        Run a tiered perf test (3 passes by default) ramping context/max_tokens each time.
+        """
+        default_tiers: List[Dict[str, int]] = [
+            {'n_ctx': 512, 'max_tokens': 64},
+            {'n_ctx': 1024, 'max_tokens': 128},
+            {'n_ctx': 2048, 'max_tokens': 256},
+        ]
+        plan = tiers or default_tiers
+        results: List[Dict[str, Any]] = []
+        for idx, tier in enumerate(plan, 1):
+            stats = self.run_perf_test(
+                model_path=model_path,
+                prompt=prompt,
+                max_tokens=int(tier.get('max_tokens', 64)),
+                n_ctx=int(tier.get('n_ctx', 1024)),
+            )
+            stats['tier'] = idx
+            stats['tier_total'] = len(plan)
+            results.append(stats)
+        return results
 
     def is_tts_backend(self) -> bool:
         return self._kind == 'tts'

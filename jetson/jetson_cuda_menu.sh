@@ -3,6 +3,12 @@ set -euo pipefail
 IFS=$'\n\t'
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PREFERRED_MODELS=(
+  "${ROOT}/models/Llama-3.2-1B-Instruct-Q8_0.gguf"
+  "${ROOT}/models/DeepSeek-R1-Distill-Qwen-1.5B-Q2_K_L.gguf"
+  "${ROOT}/models/qwen2.5-0.5b-instruct-q3_k_m.gguf"
+  "${ROOT}/models/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf"
+)
 
 find_gguf_models() {
   local search_paths=()
@@ -11,7 +17,28 @@ find_gguf_models() {
   if [ "${#search_paths[@]}" -eq 0 ]; then
     return 0
   fi
-  find "${search_paths[@]}" -maxdepth 2 -type f -name '*.gguf' 2>/dev/null | LC_ALL=C sort -u
+  local results=()
+  local add_unique
+  add_unique() {
+    local candidate="$1"
+    local existing
+    for existing in "${results[@]}"; do
+      if [ "${existing}" = "${candidate}" ]; then
+        return
+      fi
+    done
+    results+=("${candidate}")
+  }
+  local preferred
+  for preferred in "${PREFERRED_MODELS[@]}"; do
+    if [ -f "${preferred}" ]; then
+      add_unique "${preferred}"
+    fi
+  done
+  while IFS= read -r path; do
+    [ -n "${path}" ] && add_unique "${path}"
+  done < <(find "${search_paths[@]}" -maxdepth 2 -type f -name '*.gguf' 2>/dev/null | LC_ALL=C sort -u)
+  printf "%s\n" "${results[@]}"
 }
 
 setup() {
@@ -44,7 +71,7 @@ infer() {
       MODEL="${selection}"
     fi
   else
-    echo "No .gguf models found under models/ or jetson/models/."
+    echo "No .gguf models found under models/ or jetson/models/ (expected one of: ${PREFERRED_MODELS[*]})."
     read -r -p "Enter a path to a .gguf model: " MODEL
   fi
 
@@ -74,79 +101,16 @@ infer() {
     bash "${ROOT}/jetson/jetson_cuda_infer.sh"
 }
 
-finetune() {
-  mapfile -t GGUF_MODELS < <(find_gguf_models)
-  local BASE_MODEL=""
-
-  if [ "${#GGUF_MODELS[@]}" -gt 0 ]; then
-    echo "Available GGUF models:"
-    local idx
-    for idx in "${!GGUF_MODELS[@]}"; do
-      printf "  %d) %s\n" $((idx + 1)) "${GGUF_MODELS[$idx]}"
-    done
-    read -r -p "Select base model number (1-${#GGUF_MODELS[@]}) or enter a .gguf path: " selection
-    if [ -z "${selection}" ]; then
-      echo "Base model selection is required." >&2
-      return
-    fi
-    if [[ "${selection}" =~ ^[0-9]+$ ]]; then
-      local sel_idx=$((selection))
-      if [ "${sel_idx}" -lt 1 ] || [ "${sel_idx}" -gt "${#GGUF_MODELS[@]}" ]; then
-        echo "Selection out of range." >&2
-        return
-      fi
-      BASE_MODEL="${GGUF_MODELS[$((sel_idx - 1))]}"
-    else
-      BASE_MODEL="${selection}"
-    fi
-  else
-    echo "No .gguf models found under models/ or jetson/models/."
-    read -r -p "Enter a path to a .gguf base model: " BASE_MODEL
-  fi
-
-  read -r -p "Training data JSONL [${ROOT}/jetson/data/alpaca_tiny.jsonl]: " TRAIN_DATA
-  read -r -p "Output model path [${ROOT}/jetson/output/finetuned.gguf]: " OUT_MODEL
-  read -r -p "Epochs [1]: " EPOCHS
-  read -r -p "Batch size [16]: " BATCH
-  read -r -p "n_gpu_layers (-ngl) [999]: " NGL
-  read -r -p "ctx (-ctx) [2048]: " CTX
-  TRAIN_DATA=${TRAIN_DATA:-"${ROOT}/jetson/data/alpaca_tiny.jsonl"}
-  OUT_MODEL=${OUT_MODEL:-"${ROOT}/jetson/output/finetuned.gguf"}
-  EPOCHS=${EPOCHS:-1}
-  BATCH=${BATCH:-16}
-  NGL=${NGL:-999}
-  CTX=${CTX:-2048}
-
-  if [ -z "${BASE_MODEL}" ]; then
-    echo "Please provide a .gguf base model path." >&2
-    return
-  fi
-  if [[ "${BASE_MODEL}" != *.gguf ]]; then
-    echo "Base model must be a .gguf file (got: ${BASE_MODEL})." >&2
-    return
-  fi
-  if [ ! -f "${BASE_MODEL}" ]; then
-    echo "Base model not found at ${BASE_MODEL}." >&2
-    return
-  fi
-
-  TRAIN_DATA="$TRAIN_DATA" BASE_MODEL="$BASE_MODEL" OUT_MODEL="$OUT_MODEL" \
-  EPOCHS="$EPOCHS" BATCH="$BATCH" NGL="$NGL" CTX="$CTX" \
-    bash "${ROOT}/jetson/jetson_cuda_lora_finetune.sh"
-}
-
 while true; do
   echo
   echo "Jetson CUDA menu:"
   echo "1) Setup (build llama.cpp + download model)"
   echo "2) Run CUDA inference"
-  echo "3) Run finetune (GGUF output)"
   echo "q) Quit"
   read -r -p "Choose an option: " choice
   case "$choice" in
     1) setup ;;
     2) infer ;;
-    3) finetune ;;
     q|Q) exit 0 ;;
     *) echo "Invalid choice" ;;
   esac

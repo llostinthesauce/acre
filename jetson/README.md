@@ -4,9 +4,8 @@ This folder keeps Jetson-specific docs and scripts so the main ACRE app stays cr
 
 ## CUDA sidecar (CLI-first)
 - `jetson_cuda_setup.sh` — clone/build llama.cpp with CUDA (SM87), download TinyLlama GGUF into `jetson/models/`.
-- `jetson_cuda_infer.sh` — one-line CUDA inference via `llama-cli`.
-- `jetson_cuda_lora_finetune.sh` — finetune template (full GGUF output; heavy on Jetson).
-- `jetson_cuda_menu.sh` — interactive menu wrapping the above.
+- `jetson_cuda_infer.sh` — one-line CUDA inference via `llama-cli` (expects `models/Llama-3.2-1B-Instruct-Q8_0.gguf` unless `MODEL` is set).
+- `jetson_cuda_menu.sh` — interactive menu wrapping setup + inference.
 
 Prereqs: JetPack/CUDA installed (`/usr/local/cuda/bin/lib64`), `git`, `cmake`, `wget`. Optional perf mode: `sudo nvpmodel -m 0` and `sudo jetson_clocks`.
 
@@ -26,28 +25,14 @@ bash jetson/jetson_cuda_infer.sh
 ```
 Env overrides: `MODEL`, `PROMPT`, `NGL`, `CTX`, `LLAMA_CPP_LIB`.
 
-Finetune template (full GGUF, expect to hit memory limits on small Jetsons):
-```bash
-cd /home/acre/ACRE_Capstone/acre
-TRAIN_DATA=/path/to/your.jsonl \
-OUT_MODEL=/home/acre/jetson/output/finetuned.gguf \
-bash jetson/jetson_cuda_lora_finetune.sh
-# or menu option 3
-```
-Use tiny batch/ctx, expect limited success on 8 GB devices.
-
 Interactive menu:
 ```bash
 cd /home/acre/ACRE_Capstone/acre
-bash jetson/jetson_cuda_menu.sh   # 1) setup, 2) inference, 3) finetune
+bash jetson/jetson_cuda_menu.sh   # 1) setup, 2) inference
 ```
 
-## Using the CUDA lib with the GUI (optional)
-If you want the desktop app to reuse this CUDA build:
-```bash
-export LLAMA_CPP_LIB=/home/acre/ACRE_Capstone/acre/jetson/llama.cpp/build/bin/libllama.so
-```
-Ensure GGUFs are visible to the app (`jetson/models` symlinked to `models/` or copy files). Otherwise keep the GUI CPU-first.
+## GUI on Jetson (CPU-only)
+The desktop GUI is forced to CPU on Jetson (no CUDA). Do not export `LLAMA_CPP_LIB` for the GUI; keep GGUFs under `models/` for CPU inference.
 
 ## Jetson training profile (app)
 - Jetson defaults: `config/jetson_training.json` + dataset `example_datasets/jetson_training.json`, conservative batch/epochs, gradient accumulation, checkpointing, swap dir `outputs/jetson_training_swap`.
@@ -66,3 +51,5 @@ Recommended GGUFs by device size (Jetson-friendly):
 - 16 GB+ (AGX Xavier/Orin with headroom): Llama 3.1/3.2 3B Instruct Q4_K_M (`~2.2 GB`), context 2048 (maybe 3072 if memory allows), `-ngl 999`.
 
 If in doubt, start with TinyLlama Q4_K_M, context 1024–2048, and measure GR3D%/memory with `sudo tegrastats`. Adjust temperature (0.6–0.8) and max_tokens (256–512) to keep latency predictable.
+
+Note: On Jetson, the app only supports GGUF/GGML models (llama.cpp). Transformers/HF checkpoints (e.g., SmolLM, Qwen) are filtered out in the GUI; convert them to GGUF if needed.

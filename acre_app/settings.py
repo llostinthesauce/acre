@@ -6,6 +6,7 @@ from hashlib import pbkdf2_hmac
 from typing import Dict, List, Optional, Tuple
 
 from .constants import CONFIG_PATH
+from platform_utils import is_jetson
 
 
 def load_settings() -> dict:
@@ -101,6 +102,9 @@ def verify_password(username: str, password: str, settings: dict) -> bool:
 def get_prefs() -> dict:
     settings = load_settings()
     prefs = settings.setdefault("prefs", {})
+    device_pref = str(prefs.get("device_preference", "auto")).lower()
+    if is_jetson():
+        device_pref = "cpu"
     return {
         "text_temperature": float(prefs.get("text_temperature", 0.7)),
         "text_max_tokens": int(prefs.get("text_max_tokens", 512)),
@@ -114,7 +118,7 @@ def get_prefs() -> dict:
             else int(prefs.get("image_seed"))
         ),
         "ui_scale": float(prefs.get("ui_scale", 1.15)),
-        "device_preference": str(prefs.get("device_preference", "auto")).lower(),
+        "device_preference": device_pref,
         "history_enabled": bool(prefs.get("history_enabled", True)),
         "theme": str(prefs.get("theme", "Blue")),
         "text_scale": float(prefs.get("text_scale", prefs.get("ui_scale", 1.15))),

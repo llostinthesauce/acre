@@ -10,6 +10,7 @@ from typing import Optional
 import customtkinter as ctk
 from PIL import Image, ImageTk
 
+from platform_utils import is_jetson
 from . import global_state as gs
 from .attachments import refresh_attach_row
 from .chat import render_history
@@ -556,6 +557,7 @@ def render_settings_tab(tab) -> None:
     ctk.CTkEntry(image_body, textvariable=seed_var).pack(fill="x", pady=(0, 8))
 
     device_var = tk.StringVar(value=prefs["device_preference"])
+    device_values = ["cpu"] if is_jetson() else ["auto", "mps", "cuda", "cpu"]
     ui_scale_var = tk.DoubleVar(value=prefs["ui_scale"])
     history_var = tk.BooleanVar(value=prefs["history_enabled"])
 
@@ -577,7 +579,7 @@ def render_settings_tab(tab) -> None:
 
     ctk.CTkOptionMenu(
         device_row,
-        values=["auto", "mps", "cuda", "cpu"],
+        values=device_values,
         variable=device_var,
         font=font_ui,
         dropdown_font=font_ui,

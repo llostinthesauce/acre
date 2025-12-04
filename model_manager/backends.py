@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 import soundfile as sf
 from PIL import Image
+from platform_utils import is_jetson
 try:
     import torch
 except ImportError:
@@ -33,6 +34,8 @@ class BaseBackend:
 
 def pick_device(pref: str) -> str:
     pref = (pref or 'auto').lower()
+    if is_jetson():
+        return 'cpu'
     try:
         import torch
         has_mps = hasattr(torch.backends, 'mps') and torch.backends.mps.is_available()

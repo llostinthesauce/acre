@@ -534,7 +534,48 @@ class MLXBackend(BaseBackend):
             raise RuntimeError("mlx_lm is required for MLX quantized models. MLX is only available on Apple Silicon (M1/M2/M3) devices. If you're on Jetson, use GGUF or Transformers models instead.")
         except Exception as exc:
             raise RuntimeError(f'Failed to load MLX model: {exc}') from exc
-        self._model, self._tokenizer = mlx_load(str(model_dir))
+        def _try_load(**kwargs):
+            return mlx_load(str(model_dir), **kwargs)
+
+        last_exc: Optional[Exception] = None
+        try:
+            self._model, self._tokenizer = _try_load()
+            return
+        except Exception as exc:
+            last_exc = exc
+
+        # Force fast tokenizer with explicit file to avoid slow/sentencepiece path.
+        tok_file = None
+        for candidate in (model_dir / 'tokenizer.json', model_dir / 'tokenizer' / 'tokenizer.json'):
+            if candidate.exists():
+                tok_file = candidate
+                break
+        fast_kwargs: Dict[str, Any] = {'tokenizer_config': {'use_fast': True}}
+        if tok_file:
+            fast_kwargs['tokenizer_config']['tokenizer_file'] = str(tok_file)
+        try:
+            self._model, self._tokenizer = _try_load(**fast_kwargs)
+            return
+        except Exception as exc:
+            last_exc = exc
+
+        # As a last resort, try the slow tokenizer path only if sentencepiece is present.
+        has_sentencepiece = True
+        try:
+            import sentencepiece  # type: ignore
+        except Exception:
+            has_sentencepiece = False
+        if has_sentencepiece:
+            try:
+                self._model, self._tokenizer = _try_load(tokenizer_config={'use_fast': False})
+                return
+            except Exception as exc:
+                last_exc = exc
+
+        note = ''
+        if not has_sentencepiece:
+            note = ' (Install sentencepiece: pip install sentencepiece)'
+        raise RuntimeError(f'Failed to load MLX model: {last_exc}{note}') from last_exc
 
     @property
     def name(self) -> str:

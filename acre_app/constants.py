@@ -55,6 +55,10 @@ THEMES = {
         "CRITICAL_HOVER": "#d85f5f",
         "SUCCESS": "#58b896",
         "SUCCESS_HOVER": "#66c7a4",
+        "TITLE_BAR_COLOR": "#060b19",
+        "TITLE_BAR_ACCENT": "#1f2f52",
+        "PANEL_ELEVATED": "#101f3c",
+        "GLASS_BG": "#11244a",
     },
     "Green": {
         "BG_GRAD_TOP": "#0e1d17",

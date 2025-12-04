@@ -206,8 +206,8 @@ def build_title_bar() -> None:
         font=FONT_UI,
         dropdown_font=FONT_UI,
         fg_color=CONTROL_BG,
-        button_color=ACCENT,
-        button_hover_color=ACCENT_HOVER,
+    button_color=CONTROL_BG,
+    button_hover_color=CONTROL_BORDER,
         text_color=MUTED,
         corner_radius=BUTTON_RADIUS,
     )
@@ -404,7 +404,7 @@ def render_settings_tab(tab) -> None:
     row = ctk.CTkFrame(appearance_body, fg_color="transparent")
     row.pack(fill="x", pady=(0, 6))
 
-    ctk.CTkLabel(row, text="Theme", font=font_ui).grid(
+    ctk.CTkLabel(row, text="Theme", font=FONT_UI, text_color=TEXT).grid(
         row=0, column=0, padx=(0, 8), sticky="w"
     )
 
@@ -415,8 +415,8 @@ def render_settings_tab(tab) -> None:
         font=font_ui,
         dropdown_font=font_ui,
         fg_color=CONTROL_BG,
-        button_color=ACCENT,
-        button_hover_color=ACCENT_HOVER,
+    button_color=CONTROL_BG,
+    button_hover_color=CONTROL_BORDER,
         text_color=MUTED,
         corner_radius=BUTTON_RADIUS,
         command=on_theme_change,
@@ -427,7 +427,7 @@ def render_settings_tab(tab) -> None:
 
     ui_text_row = ctk.CTkFrame(appearance_body, fg_color="transparent")
     ui_text_row.pack(fill="x", pady=(6, 4))
-    ctk.CTkLabel(ui_text_row, text="App text size", font=font_ui).grid(
+    ctk.CTkLabel(ui_text_row, text="App text size", font=FONT_UI, text_color=TEXT).grid(
         row=0, column=0, padx=(0, 8), sticky="w"
     )
     ctk.CTkSlider(
@@ -436,6 +436,10 @@ def render_settings_tab(tab) -> None:
         to=1.7,
         number_of_steps=80,
         variable=text_scale_var,
+        fg_color=PANEL_ELEVATED,
+        progress_color=ACCENT,
+        button_color=ACCENT,
+        button_hover_color=ACCENT_HOVER,
     ).grid(row=0, column=1, sticky="we")
     ui_text_row.grid_columnconfigure(1, weight=1)
 
@@ -445,7 +449,7 @@ def render_settings_tab(tab) -> None:
 
     chat_text_row = ctk.CTkFrame(appearance_body, fg_color="transparent")
     chat_text_row.pack(fill="x", pady=(6, 4))
-    ctk.CTkLabel(chat_text_row, text="Chat text size", font=font_ui).grid(
+    ctk.CTkLabel(chat_text_row, text="Chat text size", font=FONT_UI, text_color=TEXT).grid(
         row=0, column=0, padx=(0, 8), sticky="w"
     )
     ctk.CTkSlider(
@@ -454,6 +458,10 @@ def render_settings_tab(tab) -> None:
         to=1.7,
         number_of_steps=80,
         variable=chat_text_scale_var,
+        fg_color=PANEL_ELEVATED,
+        progress_color=ACCENT,
+        button_color=ACCENT,
+        button_hover_color=ACCENT_HOVER,
     ).grid(row=0, column=1, sticky="we")
     chat_text_row.grid_columnconfigure(1, weight=1)
 
@@ -478,7 +486,7 @@ def render_settings_tab(tab) -> None:
         title_font=font_h2,
         blurb_font=font_ui,
     )
-    ctk.CTkLabel(text_body, text="Temperature", font=font_ui).pack(
+    ctk.CTkLabel(text_body, text="Temperature", font=FONT_UI, text_color=TEXT).pack(
         anchor="w", pady=(0, 4)
     )
     ctk.CTkSlider(
@@ -493,7 +501,7 @@ def render_settings_tab(tab) -> None:
         button_hover_color=ACCENT_HOVER,
     ).pack(fill="x", pady=(0, 8))
 
-    ctk.CTkLabel(text_body, text="Max new tokens", font=font_ui).pack(
+    ctk.CTkLabel(text_body, text="Max new tokens", font=FONT_UI, text_color=TEXT).pack(
         anchor="w", pady=(0, 4)
     )
     ctk.CTkEntry(text_body, textvariable=max_tokens_var).pack(fill="x", pady=(0, 12))
@@ -515,10 +523,10 @@ def render_settings_tab(tab) -> None:
         blurb_font=font_ui,
     )
     for label, var in [("Width", width_var), ("Height", height_var)]:
-        ctk.CTkLabel(image_body, text=label, font=font_ui).pack(anchor="w", pady=(0, 4))
+        ctk.CTkLabel(image_body, text=label, font=font_ui, text_color=TEXT).pack(anchor="w", pady=(0, 4))
         ctk.CTkEntry(image_body, textvariable=var).pack(fill="x", pady=(0, 8))
 
-    ctk.CTkLabel(image_body, text="Steps", font=font_ui).pack(anchor="w", pady=(0, 4))
+    ctk.CTkLabel(image_body, text="Steps", font=font_ui, text_color=TEXT).pack(anchor="w", pady=(0, 4))
     ctk.CTkSlider(
         image_body,
         from_=1,
@@ -531,9 +539,7 @@ def render_settings_tab(tab) -> None:
         button_hover_color=ACCENT_HOVER,
     ).pack(fill="x", pady=(0, 8))
 
-    ctk.CTkLabel(image_body, text="Guidance", font=font_ui).pack(
-        anchor="w", pady=(0, 4)
-    )
+    ctk.CTkLabel(image_body, text="Guidance", font=font_ui, text_color=TEXT).pack(anchor="w", pady=(0, 4))
     ctk.CTkSlider(
         image_body,
         from_=0.0,
@@ -546,9 +552,7 @@ def render_settings_tab(tab) -> None:
         button_hover_color=ACCENT_HOVER,
     ).pack(fill="x", pady=(0, 8))
 
-    ctk.CTkLabel(image_body, text="Seed (blank = random)", font=font_ui).pack(
-        anchor="w", pady=(0, 4)
-    )
+    ctk.CTkLabel(image_body, text="Seed (blank = random)", font=font_ui, text_color=TEXT).pack(anchor="w", pady=(0, 4))
     ctk.CTkEntry(image_body, textvariable=seed_var).pack(fill="x", pady=(0, 8))
 
     device_var = tk.StringVar(value=prefs["device_preference"])
@@ -567,7 +571,7 @@ def render_settings_tab(tab) -> None:
     device_row = ctk.CTkFrame(interface_body, fg_color="transparent")
     device_row.pack(fill="x", pady=(0, 10))
 
-    ctk.CTkLabel(device_row, text="Device preference", font=font_ui).grid(
+    ctk.CTkLabel(device_row, text="Device preference", font=FONT_UI, text_color=TEXT).grid(
         row=0, column=0, padx=(0, 8), sticky="w"
     )
 
@@ -586,11 +590,19 @@ def render_settings_tab(tab) -> None:
 
     scale_row = ctk.CTkFrame(interface_body, fg_color="transparent")
     scale_row.pack(fill="x", pady=(0, 10))
-    ctk.CTkLabel(scale_row, text="UI scale", font=font_ui).grid(
+    ctk.CTkLabel(scale_row, text="UI scale", font=FONT_UI, text_color=TEXT).grid(
         row=0, column=0, padx=(0, 8), sticky="w"
     )
     ctk.CTkSlider(
-        scale_row, from_=0.9, to=1.5, number_of_steps=60, variable=ui_scale_var
+        scale_row,
+        from_=0.9,
+        to=1.5,
+        number_of_steps=60,
+        variable=ui_scale_var,
+        fg_color=PANEL_ELEVATED,
+        progress_color=ACCENT,
+        button_color=ACCENT,
+        button_hover_color=ACCENT_HOVER,
     ).grid(row=0, column=1, sticky="we")
     scale_row.grid_columnconfigure(1, weight=1)
 
@@ -598,7 +610,12 @@ def render_settings_tab(tab) -> None:
         interface_body,
         text="Enable history (per-model, per-user)",
         variable=history_var,
-        font=font_ui,
+        font=FONT_UI,
+        text_color=TEXT,
+        fg_color=ACCENT,
+        border_color=ACCENT,
+        hover_color=ACCENT_HOVER,
+        checkmark_color=TEXT,
     ).pack(anchor="w", pady=(0, 4))
 
     ctk.CTkLabel(
@@ -1000,7 +1017,9 @@ def build_main_ui() -> None:
             selected_hover_color=ACCENT_HOVER,
             unselected_color=PANEL_ELEVATED,
             unselected_hover_color=GLASS_BG,
-        )
+            selected_text_color=TEXT,
+            unselected_text_color=TEXT,
+        )       
     except Exception:
         pass
     render_settings_tab(settings_tab)
@@ -1126,7 +1145,7 @@ def build_main_ui() -> None:
     gs.entry.bind("<KP_Enter>", send_on_return)
     gallery_top = ctk.CTkFrame(gallery_tab, fg_color="transparent")
     gallery_top.pack(fill="x", padx=12, pady=(12, 0))
-    ctk.CTkLabel(gallery_top, text="Recent images", font=FONT_H2).pack(
+    ctk.CTkLabel(gallery_top, text="Recent images", font=FONT_H2, text_color=TEXT).pack(
         side="left", padx=4, pady=6
     )
     ctk.CTkButton(

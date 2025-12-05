@@ -104,7 +104,12 @@ def get_prefs() -> dict:
     prefs = settings.setdefault("prefs", {})
     device_pref = str(prefs.get("device_preference", "auto")).lower()
     if is_jetson():
-        device_pref = "cpu"
+        device_pref = "cuda"
+    def _as_int(value, default=None):
+        try:
+            return int(value)
+        except Exception:
+            return default
     return {
         "text_temperature": float(prefs.get("text_temperature", 0.7)),
         "text_max_tokens": int(prefs.get("text_max_tokens", 512)),
@@ -122,6 +127,9 @@ def get_prefs() -> dict:
         "history_enabled": bool(prefs.get("history_enabled", True)),
         "theme": str(prefs.get("theme", "Blue")),
         "text_scale": float(prefs.get("text_scale", prefs.get("ui_scale", 1.15))),
+        "cuda_n_gpu_layers": _as_int(prefs.get("cuda_n_gpu_layers")),
+        "cuda_ctx": _as_int(prefs.get("cuda_ctx")),
+        "cuda_max_tokens": _as_int(prefs.get("cuda_max_tokens")),
     }
 
 

@@ -71,6 +71,7 @@ from .settings import (
     set_disclaimer_ack,
     set_remember_me,
     verify_password,
+    set_prefs,
 )
 from .ui_helpers import apply_native_font_scale, update_logo_visibility, update_status, recolor_whole_app
 from .utils import open_path, to_float, to_int
@@ -232,9 +233,103 @@ def _run_perf_test() -> None:
             update_status(f"Performance test complete ({len(results)} passes). Details in terminal.")
         except Exception as exc:
             update_status("Performance test failed.")
-            messagebox.showerror("Performance test failed", str(exc))
+        messagebox.showerror("Performance test failed", str(exc))
 
     threading.Thread(target=worker, daemon=True).start()
+
+
+def _open_cuda_settings_dialog() -> None:
+    if not gs.root or not gs.mgr:
+        messagebox.showerror("Error", "Model manager not initialized.")
+        return
+    prefs = get_prefs()
+    mgr = gs.mgr
+    current_ngl = prefs.get("cuda_n_gpu_layers") if prefs.get("cuda_n_gpu_layers") is not None else getattr(mgr, "_llama_gpu_layers", 8)
+    current_ctx = prefs.get("cuda_ctx") if prefs.get("cuda_ctx") is not None else getattr(mgr, "_llama_ctx", 512)
+    current_max_tokens = prefs.get("cuda_max_tokens") if prefs.get("cuda_max_tokens") is not None else getattr(mgr, "_config", None).max_tokens if getattr(mgr, "_config", None) else 512
+
+    win = ctk.CTkToplevel(gs.root)
+    win.title("CUDA Settings")
+    win.geometry("360x260")
+
+    frame = ctk.CTkFrame(win, fg_color="transparent")
+    frame.pack(fill="both", expand=True, padx=16, pady=16)
+
+    ngl_var = tk.StringVar(value=str(current_ngl if current_ngl is not None else ""))
+    ctx_var = tk.StringVar(value=str(current_ctx if current_ctx is not None else ""))
+    max_tokens_var = tk.StringVar(value=str(current_max_tokens if current_max_tokens is not None else ""))
+
+    def add_field(label: str, var: tk.StringVar, row: int, hint: str) -> None:
+        ctk.CTkLabel(frame, text=label, font=FONT_UI, text_color=TEXT).grid(row=row, column=0, sticky="w", pady=6, padx=(0, 8))
+        entry = ctk.CTkEntry(frame, textvariable=var)
+        entry.grid(row=row, column=1, sticky="ew", pady=6)
+        ctk.CTkLabel(frame, text=hint, font=FONT_UI, text_color=MUTED, wraplength=200, justify="left").grid(row=row, column=2, sticky="w", pady=6, padx=(6, 0))
+
+    add_field("GPU layers (-ngl)", ngl_var, 0, "Lower = less VRAM. TinyLlama: try 8–12 on Jetson.")
+    add_field("Context (-c)", ctx_var, 1, "Tokens for context. 512–1024 on Jetson to avoid OOM.")
+    add_field("Max tokens", max_tokens_var, 2, "Generation limit per reply.")
+
+    frame.grid_columnconfigure(1, weight=1)
+
+    def save_cuda_settings() -> None:
+        def parse_int(val: str, default: Optional[int]) -> Optional[int]:
+            val = (val or "").strip()
+            if not val:
+                return default
+            try:
+                return int(val)
+            except Exception:
+                return default
+
+        ngl = parse_int(ngl_var.get(), current_ngl)
+        ctx = parse_int(ctx_var.get(), current_ctx)
+        max_tokens = parse_int(max_tokens_var.get(), current_max_tokens)
+
+        if ngl is not None:
+            mgr._llama_gpu_layers = ngl
+        if ctx is not None:
+            mgr._llama_ctx = ctx
+        if max_tokens is not None:
+            mgr.set_text_config(max_tokens=max_tokens)
+
+        try:
+            set_prefs(
+                {
+                    "cuda_n_gpu_layers": ngl,
+                    "cuda_ctx": ctx,
+                    "cuda_max_tokens": max_tokens,
+                }
+            )
+        except Exception:
+            pass
+        update_status("CUDA defaults updated.")
+        try:
+            win.destroy()
+        except Exception:
+            pass
+
+    btn_row = ctk.CTkFrame(frame, fg_color="transparent")
+    btn_row.grid(row=3, column=0, columnspan=3, sticky="e", pady=(12, 0))
+    ctk.CTkButton(
+        btn_row,
+        text="Save",
+        command=save_cuda_settings,
+        fg_color=ACCENT,
+        hover_color=ACCENT_HOVER,
+        text_color="white",
+        font=FONT_BOLD,
+        corner_radius=BUTTON_RADIUS,
+    ).pack(side="right", padx=(8, 0))
+    ctk.CTkButton(
+        btn_row,
+        text="Cancel",
+        command=lambda: win.destroy(),
+        fg_color=CONTROL_BG,
+        hover_color=CONTROL_BORDER,
+        text_color=TEXT,
+        font=FONT_UI,
+        corner_radius=BUTTON_RADIUS,
+    ).pack(side="right")
 
 
 def build_title_bar() -> None:
@@ -651,7 +746,7 @@ def render_settings_tab(tab) -> None:
     ctk.CTkEntry(image_body, textvariable=seed_var).pack(fill="x", pady=(0, 8))
 
     device_var = tk.StringVar(value=prefs["device_preference"])
-    device_values = ["cpu"] if is_jetson() else ["auto", "mps", "cuda", "cpu"]
+    device_values = ["cuda"] if is_jetson() else ["auto", "mps", "cuda", "cpu"]
     ui_scale_var = tk.DoubleVar(value=prefs["ui_scale"])
     history_var = tk.BooleanVar(value=prefs["history_enabled"])
 
@@ -1077,8 +1172,8 @@ def build_main_ui() -> None:
     ).pack(**button_kwargs)
     ctk.CTkButton(
         gs.side_frame,
-        text="Train Model",
-        command=open_training_dialog,
+        text="CUDA Settings",
+        command=_open_cuda_settings_dialog,
         **primary_button,
     ).pack(**button_kwargs)
     ctk.CTkButton(

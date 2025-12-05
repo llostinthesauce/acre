@@ -129,7 +129,20 @@ def setup_environment() -> None:
     
     on_jetson = is_jetson()
     if on_jetson:
-        os.environ.setdefault("CUDA_VISIBLE_DEVICES", "-1")
+        cuda_bin = "/usr/local/cuda/bin"
+        cuda_lib = "/usr/local/cuda/lib64"
+        if cuda_bin not in os.environ.get("PATH", ""):
+            os.environ["PATH"] = f"{cuda_bin}:{os.environ.get('PATH','')}"
+        ld_lp = os.environ.get("LD_LIBRARY_PATH", "")
+        if cuda_lib not in ld_lp:
+            os.environ["LD_LIBRARY_PATH"] = f"{cuda_lib}:{ld_lp}" if ld_lp else cuda_lib
+        default_llama_lib = BASE_DIR / "jetson" / "llama.cpp" / "build" / "bin" / "libllama.so"
+        if not os.environ.get("LLAMA_CPP_LIB") and default_llama_lib.exists():
+            os.environ["LLAMA_CPP_LIB"] = str(default_llama_lib)
+        if not os.environ.get("LLAMA_CPP_LIB") or not Path(os.environ["LLAMA_CPP_LIB"]).exists():
+            print("ERROR: CUDA GUI build requires LLAMA_CPP_LIB pointing to a CUDA-built libllama.so.")
+            print("Run: bash jetson/jetson_cuda_setup.sh")
+            sys.exit(1)
     arm64_linux = is_arm64_linux()
     if arm64_linux and not on_jetson:
         print("WARNING: Detected ARM64 Linux system. PyTorch must be installed manually.")

@@ -34,8 +34,12 @@ class ModelManager:
         self._history_enabled = True
         self._device_pref = device_pref
         self._llama_threads: Optional[int] = None
+        # Default context; override for Jetson below.
         self._llama_ctx: Optional[int] = 4096
         self._llama_gpu_layers: Optional[int] = self._suggest_llama_gpu_layers(device_pref)
+        if is_jetson():
+            self._llama_ctx = 512
+            self._llama_gpu_layers = 8
         self._kind: str = 'text'
         self._encryptor: Optional[Any] = None
         self._generation_lock = threading.Lock()
@@ -74,12 +78,12 @@ class ModelManager:
 
     def _suggest_llama_gpu_layers(self, pref: str) -> Optional[int]:
         pref = (pref or 'auto').lower()
+        if is_jetson():
+            return 8
         if pref == 'cpu':
             return 0
         if pref in ('cuda', 'mps'):
             return -1
-        if is_jetson():
-            return 0
         try:
             import torch
             if torch.cuda.is_available() or (hasattr(torch.backends, 'mps') and torch.backends.mps.is_available()):

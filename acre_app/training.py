@@ -449,8 +449,6 @@ def _ensure_swap_directory(profile: Optional[Dict[str, Any]]) -> None:
 
 
 def _determine_training_device(pref: str, torch_module) -> str:
-    if is_jetson():
-        return "cpu"
     candidate = (pref or "auto").lower()
     if candidate in ("auto", "cuda"):
         try:

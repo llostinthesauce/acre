@@ -1,0 +1,58 @@
+{
+  "violence_harm": [
+    "kill", "murder", "harm", "injure", "hurt", "stab", "shoot",
+    "bomb", "explosive", "detonator", "grenade", "weapon",
+    "gun", "firearm", "ammo", "sabotage", "attack", "assault",
+    "poison", "toxin", "venom", "chemical weapon"
+  ],
+
+  "self_harm": [
+    "suicide", "kill myself", "end my life", "self-harm",
+    "self injury", "cut myself", "overdose", "i want to die",
+    "hurt myself"
+  ],
+
+  "illegal_activities": [
+    "hack", "hacking", "exploit", "backdoor", "ddos", "malware",
+    "virus", "worm", "phishing", "bruteforce", "keylogger",
+    "steal", "rob", "theft", "fraud", "scam", "counterfeit",
+    "fake id", "forgery", "lockpick", "bypass security",
+    "money laundering", "tax evasion", "drug dealing",
+    "meth", "cocaine", "heroin", "ecstasy"
+  ],
+
+  "extremism_terrorism": [
+    "isis", "al-qaeda", "taliban", "terrorism", "extremism",
+    "jihad attack", "bomb plot", "radicalization", "recruit fighters"
+  ],
+
+  "biological_chemical_threats": [
+    "anthrax", "smallpox", "botulinum", "ricin",
+    "weaponize", "aerosolize", "pathogen culture",
+    "toxic gas", "mustard gas", "nerve agent",
+    "crispr weapon", "bioweapon", "lab protocol dangerous"
+  ],
+
+  "cybersecurity_misuse": [
+    "sql injection", "xss attack", "privilege escalation",
+    "zero-day exploit", "build ransomware", "create malware",
+    "ddos tool", "botnet", "packet sniffing", "credential harvesting"
+  ],
+
+  "privacy_violation": [
+    "doxx", "track someone", "locate address", "gps tracker",
+    "hack account", "steal password", "private key", "bypass login"
+  ],
+
+  "medical_drug_misuse": [
+    "incorrect dosage", "how much fentanyl", "mix drugs",
+    "make narcotics", "illegal prescription", "opioid recipe"
+  ],
+
+  "dangerous_intent_phrases": [
+    "how do i make a weapon",
+    "without getting caught",
+    "how to hide a body", "how to evade police",
+    "how to disable security", "how to break in"
+  ]
+}

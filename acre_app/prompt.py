@@ -9,6 +9,8 @@ from .constants import OUTPUTS_PATH, PLACEHOLDER
 from .gallery import refresh_gallery
 from .settings import get_prefs
 from .ui_helpers import update_status
+from .safety import find_trigger_terms, build_safety_message
+
 
 THINK_TAG_PATTERN = re.compile(r"\s*/(no_)?think\s*$", re.IGNORECASE)
 
@@ -57,6 +59,25 @@ def run_prompt() -> None:
     text = gs.entry.get("1.0", tk.END).strip()
     if not text or text == PLACEHOLDER:
         return
+
+    triggered = find_trigger_terms(text)
+    if triggered:
+        gs.entry.delete("1.0", tk.END)
+
+        safety_msg = build_safety_message(triggered)
+
+        append_user_message(text)
+
+        if gs.chat_history:
+
+            gs.chat_history.configure(state="normal")
+            gs.chat_history.insert("end", f"Assistant (Safety Notice): {safety_msg}\n\n")
+            gs.chat_history.configure(state="disabled")
+            gs.chat_history.see("end")
+
+        update_status("Blocked due to safety filters.")
+        return
+
     if not gs.mgr or not gs.mgr.is_loaded():
         update_status("Load a model before sending a prompt.")
         return

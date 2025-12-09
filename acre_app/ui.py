@@ -695,32 +695,6 @@ def render_settings_tab(tab) -> None:
         corner_radius=BUTTON_RADIUS,
     ).pack(anchor="w", pady=(4, 8), padx=4)
 
-    help_body = _make_settings_card(
-        scroll,
-        "Find Models / Help",
-        "Browse community models and downloads.",
-        title_font=font_h2,
-        blurb_font=font_ui,
-    )
-    try:
-        import webbrowser
-        def open_models():
-            try:
-                webbrowser.open("https://huggingface.co/models")
-            except Exception:
-                messagebox.showerror("Error", "Could not open the browser.")
-        ctk.CTkButton(
-            help_body,
-            text="Open Hugging Face Models",
-            command=open_models,
-            fg_color=CONTROL_BG,
-            hover_color=CONTROL_BORDER,
-            text_color=TEXT,
-            font=font_ui,
-            corner_radius=BUTTON_RADIUS,
-        ).pack(anchor="w", pady=(4, 4), padx=4)
-    except Exception:
-        pass
 
     scale_row = ctk.CTkFrame(interface_body, fg_color="transparent")
     scale_row.pack(fill="x", pady=(0, 10))
@@ -766,6 +740,46 @@ def render_settings_tab(tab) -> None:
         title_font=font_h2,
         blurb_font=font_ui,
     )
+
+    model_info_body = _make_settings_card(
+        scroll,
+        "Model Expansion (Requires a live internet connection)",
+        (
+            "The ACRE app is a fully offline operation. However, you can expand the model offering by adding "
+            "your own additional LLMs with an internet connection.\n\n"
+            "How it works:\n"
+            "1. Visit https://huggingface.co/models.\n"
+            "2. HuggingFace has a large resevoir of models available for use. Download a model of your choosing.\n"
+            "3. If necessary, transfer the folder to this device via USB.\n"
+            "4. Place the model folder inside the 'models' directory.\n"
+            "5. Click 'Refresh' in the sidebar or restart the app.\n\n"
+            "ACRE will automatically detect compatible models and list them for loading.\n\n"
+            "Recommended models:\n"
+            "• TinyLlama 1.1B — small, fast, good for general chat.\n"
+            "• Mistral 7B — strong reasoning, very capable.\n"
+            "• LLaMA 3 8B — excellent overall quality.\n"
+            "• Qwen 3B/7B — great multilingual performance.\n"
+            "• LLaVA or BakLLaVA — vision-capable models for image understanding.\n\n"
+            "Tips:\n"
+            "- Use GGUF models for best performance on CPU devices.\n"
+            "- Larger models require more RAM. Be aware of overwhelming your hardware.\n"
+            "- Ensure each model folder contains a proper config.json or gguf file.\n"
+        ),
+        title_font=font_h2,
+        blurb_font=font_ui,
+    )
+
+    ctk.CTkButton(
+        model_info_body,
+        text="Open Models Folder",
+        command=lambda: open_path(Path('models')),
+        corner_radius=BUTTON_RADIUS,
+        fg_color=ACCENT,
+        hover_color=ACCENT_HOVER,
+        text_color="white",
+        font=font_bold,
+    ).pack(anchor="w", pady=(8, 0))
+
     button_row = ctk.CTkFrame(tools_body, fg_color="transparent")
     button_row.pack(fill="x", pady=(0, 6))
     ctk.CTkButton(

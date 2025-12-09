@@ -23,4 +23,4 @@ The application will now run on your device.
 
 7. To download models, visit "https://huggingface.co/", or click the link located within the settings menu in the application.
 
-8. You may now add/load models. For easy access to models, place them in the models folder located within the folder containing the application.
+8. You may now add/load models. For easy access to models, place them in the models folder located within the application directory.

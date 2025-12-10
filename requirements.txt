@@ -7,6 +7,7 @@ pymupdf>=1.24
 protobuf>=3.20,<6
 cryptography>=42.0.0
 numpy<2.0
+packaging>=23.2
 llama-cpp-python>=0.3.16
 torch>=2.3
 torchvision>=0.18
@@ -16,6 +17,9 @@ safetensors>=0.6.0
 huggingface_hub>=0.23
 accelerate>=0.31
 diffusers>=0.25
+peft>=0.13.0
+auto-gptq>=0.7.1; platform_system != "Darwin" and (platform_machine == "x86_64" or platform_machine == "AMD64")
+mlx-lm>=0.25.2; platform_system == "Darwin" and platform_machine == "arm64"
 datasets>=2.20.0
 psutil>=5.9
 pynvml>=11.5.0

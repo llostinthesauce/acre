@@ -675,22 +675,35 @@ class PhiVisionBackend(BaseBackend):
         self._apply_template = getattr(self._processor, 'apply_chat_template', None)
 
     def _build_prompt(self, question: str, *, include_image: bool) -> str:
+        """
+        Build a chat prompt. Prefer the processor's chat template so images are correctly
+        injected; fall back to a manual prompt with <|image_1|> tokens if that fails.
+        """
+        if callable(self._apply_template):
+            # Structured messages allow processors to wire image embeddings correctly.
+            if include_image:
+                messages = [
+                    {
+                        'role': 'user',
+                        'content': [
+                            {'type': 'image'},
+                            {'type': 'text', 'text': question},
+                        ],
+                    }
+                ]
+            else:
+                messages = [{'role': 'user', 'content': question}]
+            try:
+                prompt = self._apply_template(messages, tokenize=False, add_generation_prompt=True)
+                if isinstance(prompt, str) and prompt.endswith('<|endoftext|>'):
+                    prompt = prompt.rsplit('<|endoftext|>', 1)[0]
+                if isinstance(prompt, str) and prompt.strip():
+                    return prompt
+            except Exception:
+                pass
         user_prefix = '<|user|>\n'
         if include_image:
             user_prefix += '<|image_1|>\n'
-        if callable(self._apply_template):
-            content = ''
-            if include_image:
-                content += '<|image_1|>\n'
-            content += question
-            messages = [{'role': 'user', 'content': content}]
-            try:
-                prompt = self._apply_template(messages, tokenize=False, add_generation_prompt=True)
-                if prompt.endswith('<|endoftext|>'):
-                    prompt = prompt.rsplit('<|endoftext|>', 1)[0]
-                return prompt
-            except Exception:
-                pass
         return f'{user_prefix}{question}<|end|>\n<|assistant|>\n'
 
     @property

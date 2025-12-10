@@ -8,6 +8,9 @@ RUN apt-get update && apt-get install -y \
     libxrender-dev \
     libgomp1 \
     libgthread-2.0-0 \
+    libsndfile1 \
+    python3-tk \
+    tk \
     xvfb \
     && rm -rf /var/lib/apt/lists/*
 
@@ -20,10 +23,17 @@ RUN pip install --upgrade pip setuptools wheel
 
 COPY requirements.txt .
 
-RUN pip install --no-cache-dir -r requirements.txt
+COPY vendor ./vendor
+
+RUN if [ -d vendor ] && [ "$(ls -A vendor)" ]; then \
+        pip install --no-index --find-links=vendor -r requirements.txt; \
+    else \
+        pip install --no-cache-dir -r requirements.txt; \
+    fi
 
 COPY acre_app/ ./acre_app/
 COPY model_manager/ ./model_manager/
+COPY platform_utils.py .
 COPY transparent-logo.png .
 
 RUN mkdir -p config

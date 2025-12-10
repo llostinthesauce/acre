@@ -70,13 +70,12 @@ def refresh_attach_row() -> None:
     elif hasattr(gs.mgr, "is_vision_backend") and gs.mgr.is_vision_backend():
         ctk.CTkLabel(
             gs.attach_row,
-            text="Vision: attach image + question",
+            text="Vision: analyze documents (image analysis disabled)",
             font=FONT_UI,
             text_color=TEXT,
         ).pack(side="left", padx=12, pady=10)
         _build_button(gs.attach_row, "Analyze Document…", analyze_document)
-        _build_button(gs.attach_row, "Analyze Image…", analyze_image)
-    elif gs.mgr.is_image_backend():
+    elif hasattr(gs.mgr, "is_image_backend") and gs.mgr.is_image_backend():
         ctk.CTkLabel(
             gs.attach_row,
             text="Diffusion: type prompt → image",
@@ -86,12 +85,11 @@ def refresh_attach_row() -> None:
     else:
         ctk.CTkLabel(
             gs.attach_row,
-            text="Multimodal unavailable for this model. Load a vision-capable model to analyze images or documents.",
+            text="Document: choose PDF/text → summary",
             font=FONT_UI,
-            text_color=MUTED,
-            wraplength=480,
-            justify="left",
+            text_color=TEXT,
         ).pack(side="left", padx=12, pady=10)
+        _build_button(gs.attach_row, "Analyze Document…", analyze_document)
 
 
 def do_ocr() -> None:
@@ -150,8 +148,14 @@ def analyze_document() -> None:
     if not gs.mgr or not gs.mgr.is_loaded():
         update_status("Load a compatible model first.")
         return
-    if not hasattr(gs.mgr, "is_vision_backend") or not gs.mgr.is_vision_backend():
-        update_status("Load a vision-capable model to analyze documents.")
+    if hasattr(gs.mgr, "is_image_backend") and gs.mgr.is_image_backend():
+        update_status("Switch to a text-capable model to analyze documents.")
+        return
+    # Block obvious non-generative pipelines.
+    if (hasattr(gs.mgr, "is_ocr_backend") and gs.mgr.is_ocr_backend()) or (
+        hasattr(gs.mgr, "is_asr_backend") and gs.mgr.is_asr_backend()
+    ) or (hasattr(gs.mgr, "is_tts_backend") and gs.mgr.is_tts_backend()):
+        update_status("Load a text-capable model to analyze documents.")
         return
     path = filedialog.askopenfilename(
         title="Choose document",
@@ -192,50 +196,4 @@ def analyze_document() -> None:
 
 
 def analyze_image() -> None:
-    if not gs.mgr or not gs.mgr.is_loaded():
-        update_status("Load a compatible model first.")
-        return
-    if not hasattr(gs.mgr, "is_vision_backend") or not gs.mgr.is_vision_backend():
-        update_status("Load a vision-capable model to analyze images.")
-        return
-    path = filedialog.askopenfilename(
-        title="Choose image",
-        filetypes=[
-            ("Images", "*.png *.jpg *.jpeg *.bmp *.webp"),
-            ("All files", "*.*"),
-        ],
-    )
-    if not path:
-        return
-    img_path = Path(path)
-    prompt_text = ""
-    if gs.entry is not None:
-        prompt_text = gs.entry.get("1.0", "end").strip()
-        if prompt_text == PLACEHOLDER:
-            prompt_text = ""
-    question = prompt_text if prompt_text else "Describe this image."
-    message = f"{question}\n(Image: {img_path.name})"
-    append_user_message(message)
-    if getattr(gs.mgr, "add_history_entry", None):
-        gs.mgr.add_history_entry("user", message)
-    render_history()
-    update_status("Analyzing image…")
-
-    def worker() -> None:
-        try:
-            result = gs.mgr.analyze_image(path, question)
-        except Exception as exc:
-            update_status(f"Image analysis failed: {exc}")
-            return
-
-        def done() -> None:
-            append_assistant_message(result)
-            if getattr(gs.mgr, "add_history_entry", None):
-                gs.mgr.add_history_entry("assistant", result)
-            render_history()
-            update_status("Image analyzed.")
-
-        if gs.root:
-            gs.root.after(0, done)
-
-    threading.Thread(target=worker, daemon=True).start()
+    update_status("Image analysis is disabled for this demo.")

@@ -169,6 +169,9 @@ class ModelManager:
         architectures = [a.lower() for a in config.get('architectures', [])]
         name_lower = directory.name.lower()
         quant_info = str(config.get('quantization_config', {})).lower()
+        # Treat Qwen VL-style builds as vision-capable and route to the vision backend.
+        if ('qwen' in model_type and 'vl' in model_type) or ('vl' in name_lower) or any('vl' in arch for arch in architectures):
+            return ('phi_vision', directory, 'vision')
         if 'mlx' in name_lower or 'mlx' in quant_info:
             if is_jetson():
                 raise ValueError('MLX models are not supported on Jetson. Use GGUF or Transformers models.')
@@ -239,7 +242,7 @@ class ModelManager:
         self._current_model_name = name
         self._kind = kind
         self._history_file = self._history_dir / f'{self._safe_filename(name)}.json'
-        self._history = self._load_history() if self._kind == 'text' and self._history_enabled else []
+        self._history = self._load_history() if (self._kind in ('text', 'vision')) and self._history_enabled else []
         return (True, str(model_path))
 
     def unload(self) -> None:
@@ -527,7 +530,7 @@ class ModelManager:
     def generate(self, user_prompt: str) -> str:
         if not self._impl:
             raise RuntimeError('No model loaded.')
-        if self._kind != 'text':
+        if self._kind not in ('text', 'vision'):
             raise RuntimeError('Loaded model is not a text generator.')
         if not self._generation_lock.acquire(blocking=False):
             raise RuntimeError('Generation already in progress. Please wait for the current request to complete.')
@@ -620,7 +623,7 @@ class ModelManager:
                 pass
 
     def add_history_entry(self, role: str, content: str) -> None:
-        if self._kind != 'text':
+        if self._kind not in ('text', 'vision'):
             return
         entry = {'role': role, 'content': content}
         self._history.append(entry)

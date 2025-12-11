@@ -1,3 +1,5 @@
+# ACRE is a switchboard for running and comparing LLM workflows. It lets you swap models on the fly (including imports), toggle pipelines, and run standard chat/inference, document analysis, and image generation. You can adjust tokens/temperature, pick themes, and enable safety checks like query parsing. Model training hooks are available when you want to fine-tune. Note: Jetson devices use a different startup script and live on their own Jetson branch.
+
 # ACRE LLM Switchboard
 
 ## How to Use

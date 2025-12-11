@@ -9,7 +9,7 @@
 
 3. **Open a terminal** and navigate to the location where you cloned the repository, for example:  
    ```bash
-   cd path/to/acre-llm-switchboard
+   cd path/to/acre
    ```
 
 4. *(Optional but recommended)* **Create and activate a virtual environment:**

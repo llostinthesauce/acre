@@ -874,6 +874,24 @@ def render_settings_tab(tab) -> None:
             text_color=MUTED,
         ).pack(anchor="w")
 
+    training_body = _make_settings_card(
+        scroll,
+        "Model Training",
+        "Fine-tune a compatible base model on your own dataset. This opens the guided training setup and runs locally.",
+        title_font=font_h2,
+        blurb_font=font_ui,
+    )
+    ctk.CTkButton(
+        training_body,
+        text="Open training setup",
+        command=open_training_dialog,
+        fg_color=ACCENT,
+        hover_color=ACCENT_HOVER,
+        text_color="white",
+        font=font_bold,
+        corner_radius=BUTTON_RADIUS,
+    ).pack(anchor="w", pady=(4, 0))
+
     def save_settings_values() -> None:
         new_values = {
             "text_temperature": to_float(temp_var.get(), 0.7),
@@ -1087,12 +1105,6 @@ def build_main_ui() -> None:
         gs.side_frame,
         text="Add Model",
         command=add_model,
-        **primary_button,
-    ).pack(**button_kwargs)
-    ctk.CTkButton(
-        gs.side_frame,
-        text="Train Model",
-        command=open_training_dialog,
         **primary_button,
     ).pack(**button_kwargs)
     ctk.CTkButton(

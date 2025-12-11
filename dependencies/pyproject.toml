@@ -1,9 +1,0 @@
-[project]
-name = "acre"
-version = "1.0"
-description = "LLM Switchboard"
-requires-python = ">=3.10"
-dynamic = ["dependencies"]
-
-[tool.setuptools]
-py-modules = []

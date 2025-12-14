@@ -1,6 +1,6 @@
 import threading
 from pathlib import Path
-from tkinter import filedialog
+from tkinter import filedialog, simpledialog
 
 import customtkinter as ctk
 
@@ -19,6 +19,18 @@ from .constants import (
 )
 from .documents import summarize_document
 from .ui_helpers import update_status
+from .safety import find_trigger_terms, build_safety_message
+
+
+def _block_if_triggered(text: str) -> bool:
+    triggered = find_trigger_terms(text)
+    if not triggered:
+        return False
+    notice = build_safety_message(triggered)
+    append_assistant_message(f"Assistant (Safety Notice): {notice}")
+    render_history()
+    update_status("Blocked due to safety filters.")
+    return True
 
 
 def _build_button(parent, text, command) -> None:
@@ -70,11 +82,11 @@ def refresh_attach_row() -> None:
     elif hasattr(gs.mgr, "is_vision_backend") and gs.mgr.is_vision_backend():
         ctk.CTkLabel(
             gs.attach_row,
-            text="Vision: analyze documents (image analysis disabled)",
+            text="Vision: choose image → ask a question",
             font=FONT_UI,
             text_color=TEXT,
         ).pack(side="left", padx=12, pady=10)
-        _build_button(gs.attach_row, "Analyze Document…", analyze_document)
+        _build_button(gs.attach_row, "Analyze Image…", analyze_image)
     elif hasattr(gs.mgr, "is_image_backend") and gs.mgr.is_image_backend():
         ctk.CTkLabel(
             gs.attach_row,
@@ -107,6 +119,8 @@ def do_ocr() -> None:
     def worker() -> None:
         try:
             text = gs.mgr.run_ocr(path)
+            if _block_if_triggered(text):
+                return
             append_assistant_message(f"OCR Result: {text}")
             if getattr(gs.mgr, "add_history_entry", None):
                 gs.mgr.add_history_entry("assistant", f"OCR Result: {text}")
@@ -133,6 +147,8 @@ def do_asr() -> None:
     def worker() -> None:
         try:
             text = gs.mgr.run_asr(path)
+            if _block_if_triggered(text):
+                return
             append_assistant_message(f"Transcription: {text}")
             if getattr(gs.mgr, "add_history_entry", None):
                 gs.mgr.add_history_entry("assistant", f"Transcription: {text}")
@@ -196,4 +212,51 @@ def analyze_document() -> None:
 
 
 def analyze_image() -> None:
-    update_status("Image analysis is disabled for this demo.")
+    if not gs.mgr or not hasattr(gs.mgr, "is_vision_backend") or not gs.mgr.is_vision_backend():
+        update_status("Load a vision-capable model first.")
+        return
+    path = filedialog.askopenfilename(
+        title="Choose image",
+        filetypes=[("Images", "*.png *.jpg *.jpeg *.bmp *.webp")],
+    )
+    if not path:
+        return
+    question = simpledialog.askstring("Ask a question", "What do you want to know about this image?")
+    if not question:
+        update_status("Image analysis canceled.")
+        return
+    if _block_if_triggered(question):
+        return
+    image_path = Path(path)
+    message = f"Vision question on {image_path.name}: {question}"
+    append_user_message(message)
+    if getattr(gs.mgr, "add_history_entry", None):
+        gs.mgr.add_history_entry("user", message)
+    render_history()
+    update_status("Analyzing image…")
+
+    def worker() -> None:
+        error = None
+        answer = ""
+        try:
+            answer = gs.mgr.analyze_image(str(image_path), question)
+            if _block_if_triggered(answer):
+                return
+        except Exception as exc:
+            error = str(exc)
+
+        def done() -> None:
+            if error:
+                update_status(error)
+                return
+            reply = f"Vision analysis: {answer}"
+            append_assistant_message(reply)
+            if getattr(gs.mgr, "add_history_entry", None):
+                gs.mgr.add_history_entry("assistant", reply)
+            render_history()
+            update_status("Image analyzed.")
+
+        if gs.root:
+            gs.root.after(0, done)
+
+    threading.Thread(target=worker, daemon=True).start()

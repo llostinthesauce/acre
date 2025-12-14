@@ -13,6 +13,11 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 VENDOR = BASE_DIR / "vendor"
 
 
+def _runtime_installs_enabled() -> bool:
+    flag = os.environ.get("ACRE_ENABLE_RUNTIME_INSTALLS", "").strip().lower()
+    return flag in {"1", "true", "yes", "on"}
+
+
 def _need(mod: str) -> bool:
     try:
         return importlib.util.find_spec(mod) is None
@@ -135,6 +140,12 @@ def setup_environment() -> None:
         print("WARNING: Detected ARM64 Linux system. PyTorch must be installed manually.")
         print("  Standard PyPI PyTorch wheels are not available for ARM64 Linux.")
     
+    def _install_if_enabled(packages: list[tuple[str, str]], reason: str) -> None:
+        if not _runtime_installs_enabled():
+            print(f"Skipping runtime install for {reason} (set ACRE_ENABLE_RUNTIME_INSTALLS=1 to enable).")
+            return
+        _ensure(packages)
+
     base_packages = [
         ("customtkinter>=5.2.0", "customtkinter"),
         ("pillow>=10.2.0", "PIL"),
@@ -146,7 +157,7 @@ def setup_environment() -> None:
         ("pymupdf>=1.24", "fitz"),
         ("cryptography>=42.0.0", "cryptography"),
     ]
-    _ensure(base_packages)
+    _install_if_enabled(base_packages, "UI/runtime base packages")
     
     if _requires_transformers():
         if not arm64_linux:
@@ -155,13 +166,13 @@ def setup_environment() -> None:
                 ("torchvision>=0.18", "torchvision"),
                 ("transformers>=4.52.4", "transformers"),
             ]
-            _ensure(transformer_packages)
+            _install_if_enabled(transformer_packages, "transformers backends")
         else:
             if not _need("torch"):
                 transformers_only = [
                     ("transformers>=4.52.4", "transformers"),
                 ]
-                _ensure(transformers_only)
+                _install_if_enabled(transformers_only, "transformers-only backends")
             else:
                 print("WARNING: PyTorch not found on ARM64 Linux system.")
                 if on_jetson:
@@ -173,19 +184,19 @@ def setup_environment() -> None:
         mlx_packages = [
             ("mlx-lm>=0.25.2", "mlx_lm"),
         ]
-        _ensure(mlx_packages)
+        _install_if_enabled(mlx_packages, "MLX backends")
     
     if _requires_training() and not arm64_linux:
         training_packages = [
             ("datasets>=2.20.0", "datasets"),
         ]
-        _ensure(training_packages)
+        _install_if_enabled(training_packages, "training")
     elif _requires_training() and arm64_linux:
         if not _need("torch"):
             training_packages = [
                 ("datasets>=2.20.0", "datasets"),
             ]
-            _ensure(training_packages)
+            _install_if_enabled(training_packages, "training")
     
     if not _requires_diffusers():
         return
@@ -199,7 +210,7 @@ def setup_environment() -> None:
             ("huggingface_hub>=0.23", "huggingface_hub"),
             ("accelerate>=0.31", "accelerate"),
         ]
-        _ensure(diffusion_packages)
+        _install_if_enabled(diffusion_packages, "diffusion/image backends")
     else:
         if not _need("torch"):
             diffusion_packages = [
@@ -209,7 +220,7 @@ def setup_environment() -> None:
                 ("huggingface_hub>=0.23", "huggingface_hub"),
                 ("accelerate>=0.31", "accelerate"),
             ]
-            _ensure(diffusion_packages)
+            _install_if_enabled(diffusion_packages, "diffusion/image backends")
         else:
             print("WARNING: PyTorch not found on ARM64 Linux system.")
             if on_jetson:

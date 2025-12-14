@@ -3,6 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Iterable
 
+from .safety import find_trigger_terms, build_safety_message
+
+MAX_CHUNKS = 6
 
 class DocumentReadError(RuntimeError):
     pass
@@ -87,9 +90,16 @@ def summarize_document(manager, path: Path) -> str:
     if manager is None or not manager.is_loaded() or manager.is_image_backend():
         raise RuntimeError("A text-capable model must be loaded before analyzing a document.")
     text = extract_text(path)
+    triggered = find_trigger_terms(text)
+    if triggered:
+        raise RuntimeError(build_safety_message(triggered))
     chunks = list(_chunk_text(text))
     if not chunks:
         raise DocumentReadError("Document did not contain any text to analyze.")
+    truncated = False
+    if len(chunks) > MAX_CHUNKS:
+        chunks = chunks[:MAX_CHUNKS]
+        truncated = True
     summaries: list[str] = []
     for idx, chunk in enumerate(chunks, start=1):
         prompt = (
@@ -106,4 +116,6 @@ def summarize_document(manager, path: Path) -> str:
             f"Limit the response to around 200 words.\n\n{combined}\n\nOverall Summary:"
         )
         final_summary = _call_model(manager, merge_prompt)
+    if truncated:
+        final_summary = f"(Note: Only the first {MAX_CHUNKS} sections were processed.)\n\n{final_summary}"
     return f"Summary of {path.name}:\n{final_summary.strip()}"

@@ -30,6 +30,7 @@
    pip install -r requirements.txt
    ```
    This command will install all of the required dependencies to run the app, which are listed in the `requirements.txt` file.
+   Runtime auto-installs are disabled by default; set `ACRE_ENABLE_RUNTIME_INSTALLS=1` before `python app.py` if you want the app to fetch any missing extras on launch.
 
 6. You can now run the application in **offline mode**.  
    Depending on your preferences, you may disconnect from your network or stay connected.  

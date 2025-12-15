@@ -6,7 +6,7 @@ import re
 import threading
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 from platform_utils import is_jetson
 
 from .backends import ASRBackend, AutoGPTQBackend, BaseBackend, DiffusersT2IBackend, HFBackend, LlamaCppBackend, MLXBackend, OCRBackend, PhiVisionBackend, TTSBackend
@@ -40,9 +40,51 @@ class ModelManager:
         self._encryptor: Optional[Any] = None
         self._generation_lock = threading.Lock()
         self._generating = False
+        self._cancel_event: Optional[threading.Event] = None
+        self._cancel_requested = False
+        self._system_prompt: str = ""
+
+    def set_system_prompt(self, prompt: Optional[str]) -> None:
+        self._system_prompt = str(prompt or "").strip()
+
+    @property
+    def system_prompt(self) -> str:
+        return self._system_prompt
+
+    def pop_last_exchange(self) -> Optional[str]:
+        """
+        Remove the most recent assistant reply (and its preceding user message, if present),
+        returning the user prompt text for regeneration.
+        """
+        if self._kind not in ("text", "vision"):
+            return None
+        if not self._generation_lock.acquire(blocking=False):
+            raise RuntimeError("Generation already in progress. Please wait for the current request to complete.")
+        try:
+            if not self._history:
+                return None
+            if self._history and self._history[-1].get("role") == "assistant":
+                self._history.pop()
+            if not self._history:
+                return None
+            if self._history[-1].get("role") != "user":
+                return None
+            prompt = str(self._history.pop().get("content", "") or "")
+            if self._history_enabled:
+                self._save_history()
+            return prompt
+        finally:
+            self._generation_lock.release()
 
     def set_encryptor(self, encryptor: Optional[Any]) -> None:
         self._encryptor = encryptor
+
+    def cancel_generation(self) -> None:
+        event = self._cancel_event
+        if event is not None:
+            event.set()
+            return
+        self._cancel_requested = True
 
     def set_history_enabled(self, enabled: bool) -> None:
         self._history_enabled = bool(enabled)
@@ -572,6 +614,440 @@ class ModelManager:
             self._generating = False
             self._generation_lock.release()
 
+    def generate_stream(self, user_prompt: str, *, cancel_event: Optional[threading.Event] = None) -> Iterator[str]:
+        """
+        Stream a text response in chunks. Best-effort cancellation via ``cancel_generation()``
+        (or providing a cancel_event) is supported when the backend exposes streaming.
+        """
+        if not self._impl:
+            raise RuntimeError("No model loaded.")
+        if self._kind not in ("text", "vision"):
+            raise RuntimeError("Loaded model is not a text generator.")
+        if not self._generation_lock.acquire(blocking=False):
+            raise RuntimeError("Generation already in progress. Please wait for the current request to complete.")
+
+        event = cancel_event or threading.Event()
+        self._cancel_event = event
+        if self._cancel_requested:
+            self._cancel_requested = False
+            event.set()
+        stop_backup: Optional[Tuple[str, ...]] = None
+
+        # Streaming filters.
+        think_open = "<think>"
+        think_close = "</think>"
+        think_buffer = ""
+        in_think = False
+
+        stop_tokens: Tuple[str, ...] = ()
+        max_stop_len = 0
+        stop_buffer = ""
+        stop_triggered = False
+
+        def filter_think(raw: str) -> str:
+            nonlocal think_buffer, in_think
+            if not raw:
+                return ""
+            think_buffer += raw
+            out_parts: list[str] = []
+            while think_buffer:
+                if in_think:
+                    idx = think_buffer.find(think_close)
+                    if idx == -1:
+                        keep = max(0, len(think_close) - 1)
+                        if keep and len(think_buffer) > keep:
+                            think_buffer = think_buffer[-keep:]
+                        break
+                    think_buffer = think_buffer[idx + len(think_close):]
+                    in_think = False
+                    continue
+                idx = think_buffer.find(think_open)
+                if idx == -1:
+                    keep = max(0, len(think_open) - 1)
+                    if keep and len(think_buffer) > keep:
+                        out_parts.append(think_buffer[:-keep])
+                        think_buffer = think_buffer[-keep:]
+                    break
+                if idx:
+                    out_parts.append(think_buffer[:idx])
+                think_buffer = think_buffer[idx + len(think_open):]
+                in_think = True
+            return "".join(out_parts)
+
+        def emit_with_stop_filter(text: str) -> Iterator[str]:
+            nonlocal stop_buffer
+            nonlocal stop_triggered
+            if not text and not stop_buffer:
+                return
+            if not stop_tokens or max_stop_len <= 1:
+                if text:
+                    yield text
+                return
+            combined = stop_buffer + (text or "")
+            hit_at: Optional[int] = None
+            for token in stop_tokens:
+                if not token:
+                    continue
+                idx = combined.find(token)
+                if idx != -1 and (hit_at is None or idx < hit_at):
+                    hit_at = idx
+            if hit_at is not None:
+                prefix = combined[:hit_at]
+                if prefix:
+                    yield prefix
+                stop_triggered = True
+                stop_buffer = ""
+                return
+            keep = max_stop_len - 1
+            if len(combined) <= keep:
+                stop_buffer = combined
+                return
+            stop_buffer = combined[-keep:]
+            head = combined[:-keep]
+            if head:
+                yield head
+
+        self._generating = True
+        snapshot = list(self._history)
+        self._history.append({"role": "user", "content": user_prompt})
+        use_template = hasattr(self._impl, "format_chat")
+        prompt: str
+        if use_template:
+            prompt = self._format_with_template()
+            if prompt:
+                stop_backup = self._config.stop
+                self._config.stop = ()
+            else:
+                use_template = False
+        if not use_template:
+            prompt = self._build_prompt_plain() if self._history_enabled else user_prompt
+
+        # Stop sequences may be disabled temporarily for chat-template formatting.
+        stop_tokens = tuple(self._config.stop) if self._config.stop else ()
+        max_stop_len = max((len(token) for token in stop_tokens if token), default=0)
+        stop_buffer = ""
+        stop_triggered = False
+
+        raw_accum = ""
+        try:
+            stream_fn = getattr(self._impl, "generate_stream", None)
+            if callable(stream_fn):
+                for raw_chunk in stream_fn(prompt, self._config, event):
+                    if event.is_set() or stop_triggered:
+                        break
+                    visible = filter_think(str(raw_chunk))
+                    if not visible:
+                        continue
+                    for out in emit_with_stop_filter(visible):
+                        raw_accum += out
+                        yield out
+                    if event.is_set() or stop_triggered:
+                        break
+            else:
+                if event.is_set():
+                    return
+                text = self._impl.generate(prompt, self._config)
+                text = self._postprocess_response(text)
+                if not event.is_set() and text:
+                    raw_accum = text
+                    yield text
+
+            # Flush any remaining buffered text (including cancellation), but never emit stop sequences.
+            if not stop_triggered:
+                if think_buffer and not in_think:
+                    tail = think_buffer
+                    think_buffer = ""
+                else:
+                    tail = ""
+                    think_buffer = ""
+                if tail:
+                    for out in emit_with_stop_filter(tail):
+                        raw_accum += out
+                        yield out
+                if stop_buffer:
+                    raw_accum += stop_buffer
+                    yield stop_buffer
+                stop_buffer = ""
+            else:
+                think_buffer = ""
+                stop_buffer = ""
+
+            cleaned = self._postprocess_response(raw_accum)
+            if self._history_enabled:
+                if event.is_set() and not (cleaned.strip() or raw_accum.strip()):
+                    self._history = snapshot
+                else:
+                    if cleaned.strip():
+                        self._history.append({"role": "assistant", "content": cleaned.strip()})
+                    self._save_history()
+            else:
+                self._history = snapshot
+        except Exception as exc:
+            self._history = snapshot
+            if self._looks_like_oom(exc):
+                self.cleanup_memory()
+                raise RuntimeError(
+                    "Generation failed: out of memory. Lower max tokens, disable chat history, or run Free VRAM from Settings."
+                ) from exc
+            raise RuntimeError(f"Generation failed: {exc}") from exc
+        finally:
+            self._cancel_event = None
+            self._cancel_requested = False
+            self._generating = False
+            self._generation_lock.release()
+            if stop_backup is not None:
+                self._config.stop = stop_backup
+
+    def generate_messages(
+        self,
+        messages: List[dict],
+        *,
+        max_tokens: Optional[int] = None,
+        temperature: Optional[float] = None,
+        stop: Optional[Tuple[str, ...]] = None,
+    ) -> str:
+        """
+        Generate a response from an explicit list of chat messages (OpenAI-style).
+
+        Unlike ``generate()``, this does not append to or persist the manager's chat history.
+        """
+        if not self._impl:
+            raise RuntimeError("No model loaded.")
+        if self._kind not in ("text", "vision"):
+            raise RuntimeError("Loaded model is not a text generator.")
+        if not self._generation_lock.acquire(blocking=False):
+            raise RuntimeError("Generation already in progress. Please wait for the current request to complete.")
+        try:
+            self._generating = True
+            cfg = GenerationConfig(
+                max_tokens=self._config.max_tokens,
+                temperature=self._config.temperature,
+                stop=self._config.stop,
+            )
+            if max_tokens is not None:
+                cfg.max_tokens = int(max_tokens)
+            if temperature is not None:
+                cfg.temperature = float(temperature)
+            stop_override = stop is not None
+            if stop_override:
+                cfg.stop = tuple(stop)
+
+            use_template = hasattr(self._impl, "format_chat")
+            prompt: str = ""
+            if use_template:
+                prompt = self._format_with_template_messages(messages)
+                if prompt:
+                    if not stop_override:
+                        cfg.stop = ()
+                else:
+                    use_template = False
+            if not use_template:
+                prompt = self._build_prompt_plain_from_messages(messages)
+
+            text = self._impl.generate(prompt, cfg)
+            return self._postprocess_response(text)
+        except Exception as exc:
+            if self._looks_like_oom(exc):
+                self.cleanup_memory()
+                raise RuntimeError(
+                    "Generation failed: out of memory. Lower max tokens, disable chat history, or run Free VRAM from Settings."
+                ) from exc
+            raise RuntimeError(f"Generation failed: {exc}") from exc
+        finally:
+            self._generating = False
+            self._generation_lock.release()
+
+    def generate_stream_messages(
+        self,
+        messages: List[dict],
+        *,
+        cancel_event: Optional[threading.Event] = None,
+        max_tokens: Optional[int] = None,
+        temperature: Optional[float] = None,
+        stop: Optional[Tuple[str, ...]] = None,
+    ) -> Iterator[str]:
+        """
+        Stream a response from an explicit list of chat messages (OpenAI-style).
+
+        Unlike ``generate_stream()``, this does not append to or persist the manager's chat history.
+        """
+        if not self._impl:
+            raise RuntimeError("No model loaded.")
+        if self._kind not in ("text", "vision"):
+            raise RuntimeError("Loaded model is not a text generator.")
+        if not self._generation_lock.acquire(blocking=False):
+            raise RuntimeError("Generation already in progress. Please wait for the current request to complete.")
+
+        event = cancel_event or threading.Event()
+        self._cancel_event = event
+        if self._cancel_requested:
+            self._cancel_requested = False
+            event.set()
+
+        cfg = GenerationConfig(
+            max_tokens=self._config.max_tokens,
+            temperature=self._config.temperature,
+            stop=self._config.stop,
+        )
+        if max_tokens is not None:
+            cfg.max_tokens = int(max_tokens)
+        if temperature is not None:
+            cfg.temperature = float(temperature)
+        stop_override = stop is not None
+        if stop_override:
+            cfg.stop = tuple(stop)
+
+        # Streaming filters.
+        think_open = "<think>"
+        think_close = "</think>"
+        think_buffer = ""
+        in_think = False
+
+        stop_tokens: Tuple[str, ...] = ()
+        max_stop_len = 0
+        stop_buffer = ""
+        stop_triggered = False
+
+        def filter_think(raw: str) -> str:
+            nonlocal think_buffer, in_think
+            if not raw:
+                return ""
+            think_buffer += raw
+            out_parts: list[str] = []
+            while think_buffer:
+                if in_think:
+                    idx = think_buffer.find(think_close)
+                    if idx == -1:
+                        keep = max(0, len(think_close) - 1)
+                        if keep and len(think_buffer) > keep:
+                            think_buffer = think_buffer[-keep:]
+                        break
+                    think_buffer = think_buffer[idx + len(think_close):]
+                    in_think = False
+                    continue
+                idx = think_buffer.find(think_open)
+                if idx == -1:
+                    keep = max(0, len(think_open) - 1)
+                    if keep and len(think_buffer) > keep:
+                        out_parts.append(think_buffer[:-keep])
+                        think_buffer = think_buffer[-keep:]
+                    break
+                if idx:
+                    out_parts.append(think_buffer[:idx])
+                think_buffer = think_buffer[idx + len(think_open):]
+                in_think = True
+            return "".join(out_parts)
+
+        def emit_with_stop_filter(text: str) -> Iterator[str]:
+            nonlocal stop_buffer
+            nonlocal stop_triggered
+            if not text and not stop_buffer:
+                return
+            if not stop_tokens or max_stop_len <= 1:
+                if text:
+                    yield text
+                return
+            combined = stop_buffer + (text or "")
+            hit_at: Optional[int] = None
+            for token in stop_tokens:
+                if not token:
+                    continue
+                idx = combined.find(token)
+                if idx != -1 and (hit_at is None or idx < hit_at):
+                    hit_at = idx
+            if hit_at is not None:
+                prefix = combined[:hit_at]
+                if prefix:
+                    yield prefix
+                stop_triggered = True
+                stop_buffer = ""
+                return
+            keep = max_stop_len - 1
+            if len(combined) <= keep:
+                stop_buffer = combined
+                return
+            stop_buffer = combined[-keep:]
+            head = combined[:-keep]
+            if head:
+                yield head
+
+        use_template = hasattr(self._impl, "format_chat")
+        prompt: str = ""
+        if use_template:
+            prompt = self._format_with_template_messages(messages)
+            if prompt:
+                if not stop_override:
+                    cfg.stop = ()
+            else:
+                use_template = False
+        if not use_template:
+            prompt = self._build_prompt_plain_from_messages(messages)
+
+        # Stop sequences may be disabled temporarily for chat-template formatting.
+        stop_tokens = tuple(cfg.stop) if cfg.stop else ()
+        max_stop_len = max((len(token) for token in stop_tokens if token), default=0)
+        stop_buffer = ""
+        stop_triggered = False
+
+        self._generating = True
+        raw_accum = ""
+        try:
+            stream_fn = getattr(self._impl, "generate_stream", None)
+            if callable(stream_fn):
+                for raw_chunk in stream_fn(prompt, cfg, event):
+                    if event.is_set() or stop_triggered:
+                        break
+                    visible = filter_think(str(raw_chunk))
+                    if not visible:
+                        continue
+                    for out in emit_with_stop_filter(visible):
+                        raw_accum += out
+                        yield out
+                    if event.is_set() or stop_triggered:
+                        break
+            else:
+                if event.is_set():
+                    return
+                text = self._impl.generate(prompt, cfg)
+                text = self._postprocess_response(text)
+                if not event.is_set() and text:
+                    raw_accum = text
+                    yield text
+
+            # Flush any remaining buffered text (including cancellation), but never emit stop sequences.
+            if not stop_triggered:
+                if think_buffer and not in_think:
+                    tail = think_buffer
+                    think_buffer = ""
+                else:
+                    tail = ""
+                    think_buffer = ""
+                if tail:
+                    for out in emit_with_stop_filter(tail):
+                        raw_accum += out
+                        yield out
+                if stop_buffer:
+                    raw_accum += stop_buffer
+                    yield stop_buffer
+                stop_buffer = ""
+            else:
+                think_buffer = ""
+                stop_buffer = ""
+
+            self._postprocess_response(raw_accum)
+        except Exception as exc:
+            if self._looks_like_oom(exc):
+                self.cleanup_memory()
+                raise RuntimeError(
+                    "Generation failed: out of memory. Lower max tokens, disable chat history, or run Free VRAM from Settings."
+                ) from exc
+            raise RuntimeError(f"Generation failed: {exc}") from exc
+        finally:
+            self._cancel_event = None
+            self._cancel_requested = False
+            self._generating = False
+            self._generation_lock.release()
+
     def run_ocr(self, image_path: str) -> str:
         if not self._impl or not self.is_ocr_backend():
             raise RuntimeError('No OCR model loaded.')
@@ -609,7 +1085,26 @@ class ModelManager:
         analyzer = getattr(self._impl, 'analyze_image', None)
         if not callable(analyzer):
             raise RuntimeError('Loaded model does not support image analysis.')
-        return analyzer(Path(image_path), question, self._config)
+        if not self._generation_lock.acquire(blocking=False):
+            raise RuntimeError('Generation already in progress. Please wait for the current request to complete.')
+        try:
+            self._generating = True
+            cfg = GenerationConfig(
+                max_tokens=self._config.max_tokens,
+                temperature=self._config.temperature,
+                stop=self._config.stop,
+            )
+            return analyzer(Path(image_path), question, cfg)
+        except Exception as exc:
+            if self._looks_like_oom(exc):
+                self.cleanup_memory()
+                raise RuntimeError(
+                    "Vision analysis failed: out of memory. Lower max tokens, disable chat history, or run Free VRAM from Settings."
+                ) from exc
+            raise RuntimeError(f'Vision analysis failed: {exc}') from exc
+        finally:
+            self._generating = False
+            self._generation_lock.release()
 
     def get_history(self) -> List[dict]:
         return list(self._history)
@@ -731,6 +1226,8 @@ class ModelManager:
 
     def _build_prompt_plain(self) -> str:
         parts = []
+        if self._system_prompt.strip():
+            parts.append(f"System: {self._system_prompt.strip()}")
         for message in self._history:
             role = message.get('role', 'user')
             content = message.get('content', '')
@@ -741,6 +1238,49 @@ class ModelManager:
         parts.append('Assistant:')
         return '\n'.join(parts)
 
+    def _normalize_message_content(self, content: Any) -> str:
+        if content is None:
+            return ""
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            texts: list[str] = []
+            for part in content:
+                if isinstance(part, str):
+                    if part.strip():
+                        texts.append(part)
+                    continue
+                if not isinstance(part, dict):
+                    continue
+                part_type = str(part.get("type", "")).lower()
+                if part_type in {"text", "input_text"}:
+                    text = part.get("text") or part.get("content") or ""
+                    if isinstance(text, str) and text.strip():
+                        texts.append(text)
+            return "\n".join(texts)
+        if isinstance(content, dict):
+            text = content.get("text")
+            return str(text) if text is not None else ""
+        return str(content)
+
+    def _build_prompt_plain_from_messages(self, messages: List[dict]) -> str:
+        parts: list[str] = []
+        for message in messages or []:
+            if not isinstance(message, dict):
+                continue
+            role = str(message.get("role") or "user").lower()
+            content = self._normalize_message_content(message.get("content", ""))
+            if not content.strip():
+                continue
+            if role == "system":
+                parts.append(f"System: {content}")
+            elif role == "assistant":
+                parts.append(f"Assistant: {content}")
+            else:
+                parts.append(f"User: {content}")
+        parts.append("Assistant:")
+        return "\n".join(parts)
+
     def _safe_filename(self, name: str) -> str:
         return re.sub('[^A-Za-z0-9_.-]', '_', name)
 
@@ -748,11 +1288,24 @@ class ModelManager:
         formatter = getattr(self._impl, 'format_chat', None)
         if not callable(formatter):
             return ''
+        messages = self._history
+        if self._system_prompt.strip():
+            messages = [{"role": "system", "content": self._system_prompt.strip()}] + list(self._history)
         try:
-            formatted = formatter(self._history)
+            formatted = formatter(messages)
         except Exception:
             return ''
         return formatted or ''
+
+    def _format_with_template_messages(self, messages: List[dict]) -> str:
+        formatter = getattr(self._impl, "format_chat", None)
+        if not callable(formatter):
+            return ""
+        try:
+            formatted = formatter(messages)
+        except Exception:
+            return ""
+        return formatted or ""
 
     def _postprocess_response(self, text: str) -> str:
         cleaned = re.sub('<think>.*?</think>', '', text, flags=re.DOTALL).strip()

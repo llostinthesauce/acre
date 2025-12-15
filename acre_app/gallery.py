@@ -8,6 +8,7 @@ from PIL import Image, ImageTk
 from tkinter import messagebox
 
 from . import global_state as gs
+from . import paths
 from .constants import (
     ACCENT,
     ACCENT_HOVER,
@@ -29,9 +30,10 @@ def ensure_user_dirs() -> None:
     if not gs.current_user:
         return
     try:
-        (Path("history") / gs.current_user).mkdir(parents=True, exist_ok=True)
-        (OUTPUTS_PATH / gs.current_user).mkdir(parents=True, exist_ok=True)
-        (OUTPUTS_PATH / gs.current_user / ".thumbnails").mkdir(parents=True, exist_ok=True)
+        paths.user_history_dir(gs.current_user).mkdir(parents=True, exist_ok=True)
+        outputs = paths.user_outputs_dir(gs.current_user)
+        outputs.mkdir(parents=True, exist_ok=True)
+        (outputs / ".thumbnails").mkdir(parents=True, exist_ok=True)
     except PermissionError:
         from tkinter import messagebox
         messagebox.showerror(

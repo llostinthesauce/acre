@@ -12,6 +12,7 @@ from .compat import ensure_tensor_parallel_stub
 from platform_utils import is_jetson
 
 from . import global_state as gs
+from . import paths
 from .constants import (
     ACCENT,
     ACCENT_HOVER,
@@ -19,7 +20,6 @@ from .constants import (
     BUTTON_RADIUS,
     FONT_BOLD,
     FONT_UI,
-    MODELS_PATH,
     MUTED,
     OUTPUTS_PATH,
     SUCCESS,
@@ -131,7 +131,8 @@ def open_training_dialog():
     on_jetson = is_jetson()
     
     models = gs.mgr.list_models()
-    text_models = [m for m in models if (Path(MODELS_PATH) / m / "config.json").exists()]
+    models_root = paths.models_dir()
+    text_models = [m for m in models if (models_root / m / "config.json").exists()]
     text_models = [m for m in text_models if not any(x in m.lower() for x in ["ocr", "whisper", "tts", "vision", "diffusion", "sd-", "flux", "mlx"])]
     
     if not text_models:
@@ -340,7 +341,8 @@ def _run_training(
     torch_dtype = torch.float16 if device == "cuda" else torch.float32
 
     progress_callback("Loading model...", 0.1)
-    model_path = MODELS_PATH / base_model
+    models_root = paths.models_dir()
+    model_path = models_root / base_model
     tokenizer = AutoTokenizer.from_pretrained(str(model_path), local_files_only=True)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
@@ -371,7 +373,7 @@ def _run_training(
         progress_callback("Jetson profile: checkpointing + accumulation active.", 0.25)
     progress_callback("Starting training...", 0.3)
 
-    output_dir = MODELS_PATH / output_name
+    output_dir = models_root / output_name
     output_dir.mkdir(parents=True, exist_ok=True)
     _ensure_swap_directory(jetson_profile)
 

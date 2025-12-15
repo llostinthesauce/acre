@@ -3,6 +3,8 @@ import sys
 from pathlib import Path
 import json
 
+from . import paths
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 BG_GRAD_TOP = "#0a1022"
@@ -29,9 +31,9 @@ TITLE_BAR_ACCENT = "#1f2f52"
 PANEL_ELEVATED = "#152847"
 GLASS_BG = "#1c3158"
 
-CONFIG_PATH = BASE_DIR / "config" / "settings.json"
-MODELS_PATH = BASE_DIR / "models"
-OUTPUTS_PATH = BASE_DIR / "outputs"
+CONFIG_PATH = paths.user_config_path()
+MODELS_PATH = paths.models_dir()
+OUTPUTS_PATH = paths.outputs_dir()
 
 
 THEMES = { 
@@ -187,7 +189,12 @@ def _read_theme_name() -> str:
         data = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
         return data.get("prefs", {}).get("theme", "Blue")
     except Exception:
-        return "Blue"
+        try:
+            legacy = paths.legacy_config_path()
+            data = json.loads(legacy.read_text(encoding="utf-8"))
+            return data.get("prefs", {}).get("theme", "Blue")
+        except Exception:
+            return "Blue"
 
 def _write_theme_name(name: str) -> None:
     try:

@@ -7,13 +7,13 @@ from tkinter import filedialog, messagebox
 import customtkinter as ctk
 
 from . import global_state as gs
+from . import paths
 from .constants import (
     ACCENT,
     ACCENT_HOVER,
     BUTTON_RADIUS,
     FONT_BOLD,
     FONT_UI,
-    MODELS_PATH,
     SURFACE_ELEVATED,
     TEXT,
     TITLE_BAR_ACCENT,
@@ -75,7 +75,8 @@ def pick_model() -> None:
 
 
 def add_model() -> None:
-    MODELS_PATH.mkdir(parents=True, exist_ok=True)
+    models_root = paths.models_dir()
+    models_root.mkdir(parents=True, exist_ok=True)
     folder = messagebox.askyesno(
         "Import Model", "Import a model FOLDER? (Yes = Folder, No = Single File)"
     )
@@ -84,7 +85,7 @@ def add_model() -> None:
         if not directory:
             return
         name = os.path.basename(directory.rstrip("/"))
-        destination = MODELS_PATH / name
+        destination = models_root / name
         if destination.exists():
             messagebox.showerror("Already Exists", f"{destination} already exists.")
             return
@@ -102,7 +103,7 @@ def add_model() -> None:
     )
     if not file_path:
         return
-    destination = MODELS_PATH / Path(file_path).name
+    destination = models_root / Path(file_path).name
     try:
         shutil.copy(file_path, destination)
     except Exception as exc:

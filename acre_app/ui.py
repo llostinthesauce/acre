@@ -1,5 +1,8 @@
 import gc
+import http.client
 import os
+import re
+import socket
 import time
 import threading
 import tkinter as tk
@@ -13,6 +16,7 @@ from PIL import Image, ImageTk
 
 from platform_utils import is_jetson
 from . import global_state as gs
+from . import paths
 from .attachments import refresh_attach_row
 from .chat import render_history
 from .crypto import ChatEncryptor, derive_fernet_key
@@ -108,8 +112,38 @@ def _refresh_theme_vars() -> None:
             pass
 
 
+def _start_openai_server_with_fallback(port: int, token: Optional[str]) -> tuple[object, threading.Thread, int]:
+    from .openai_server import start_openai_server
+
+    host = "127.0.0.1"
+    start_port = int(port)
+    last_exc: Exception | None = None
+    for candidate in range(start_port, min(start_port + 10, 65536)):
+        try:
+            server, thread = start_openai_server(
+                host=host,
+                port=candidate,
+                manager_getter=lambda: gs.mgr,
+                auth_token=token,
+            )
+            return server, thread, candidate
+        except OSError as exc:
+            last_exc = exc
+            errno = getattr(exc, "errno", None)
+            message = str(exc).lower()
+            if errno in (48, 98, 10048) or "address already in use" in message:
+                continue
+            raise
+        except Exception as exc:
+            last_exc = exc
+            raise
+    if last_exc:
+        raise last_exc
+    raise RuntimeError("Failed to start local API server.")
+
+
 def _clear_all_histories() -> None:
-    base = Path("history") / (gs.current_user or "")
+    base = paths.user_history_dir(gs.current_user)
     if not base.exists():
         return
     if not messagebox.askyesno("Confirm", "Clear all histories for this user?"):
@@ -370,6 +404,14 @@ def clear_chat() -> None:
 
 def logout_action() -> None:
     try:
+        from .openai_server import stop_openai_server
+
+        stop_openai_server(getattr(gs, "api_server", None))
+    except Exception:
+        pass
+    gs.api_server = None
+    gs.api_server_thread = None
+    try:
         if gs.mgr:
             gs.mgr.unload()
     except Exception:
@@ -572,6 +614,7 @@ def render_settings_tab(tab) -> None:
         text_scale_labels.grid_columnconfigure(col, weight=1)
     temp_var = tk.DoubleVar(value=prefs["text_temperature"])
     max_tokens_var = tk.StringVar(value=str(prefs["text_max_tokens"]))
+    system_prompt_value = str(prefs.get("system_prompt", "") or "")
 
     text_body = _make_settings_card(
         scroll,
@@ -600,6 +643,79 @@ def render_settings_tab(tab) -> None:
         anchor="w", pady=(0, 4)
     )
     ctk.CTkEntry(text_body, textvariable=max_tokens_var).pack(fill="x", pady=(0, 12))
+
+    system_presets = {
+        "None (default)": "",
+        "Concise": "You are a concise assistant. Give direct answers. Ask one clarifying question only if needed.",
+        "Coding": "You are a senior software engineer. Prefer minimal, correct changes. Provide runnable commands and file paths.",
+        "Tutor": "You are a patient tutor. Explain step-by-step, then provide a short summary and a quick self-check quiz.",
+        "Citations": "You must cite sources when provided, using bracketed numbers like [1], [2]. If unsure, say you don't know.",
+    }
+
+    def _preset_name_for_value(value: str) -> str:
+        cleaned = (value or "").strip()
+        for name, preset_value in system_presets.items():
+            if cleaned == (preset_value or "").strip():
+                return name
+        return "Custom"
+
+    preset_var = tk.StringVar(value=_preset_name_for_value(system_prompt_value))
+    preset_row = ctk.CTkFrame(text_body, fg_color="transparent")
+    preset_row.pack(fill="x", pady=(0, 8))
+    ctk.CTkLabel(preset_row, text="System preset", font=FONT_UI, text_color=TEXT).grid(
+        row=0, column=0, padx=(0, 8), sticky="w"
+    )
+    preset_menu = ctk.CTkOptionMenu(
+        preset_row,
+        values=["Custom"] + list(system_presets.keys()),
+        variable=preset_var,
+        font=font_ui,
+        dropdown_font=font_ui,
+        fg_color=CONTROL_BG,
+        button_color=CONTROL_BG,
+        button_hover_color=CONTROL_BORDER,
+        text_color=MUTED,
+        corner_radius=BUTTON_RADIUS,
+        command=lambda choice: None,
+    )
+    preset_menu.grid(row=0, column=1, sticky="w")
+    preset_row.grid_columnconfigure(1, weight=1)
+
+    ctk.CTkLabel(text_body, text="System prompt (optional)", font=FONT_UI, text_color=TEXT).pack(
+        anchor="w", pady=(0, 4)
+    )
+    system_prompt_box = ctk.CTkTextbox(
+        text_body,
+        corner_radius=RADIUS_SM,
+        fg_color=SURFACE_PRIMARY,
+        text_color=TEXT,
+        font=font_ui,
+        wrap="word",
+        height=96,
+    )
+    system_prompt_box.pack(fill="x", pady=(0, 12))
+    if system_prompt_value.strip():
+        system_prompt_box.insert("1.0", system_prompt_value)
+
+    def _apply_system_preset(choice: str) -> None:
+        name = str(choice or "")
+        if name == "Custom":
+            return
+        value = system_presets.get(name)
+        if value is None:
+            return
+        try:
+            system_prompt_box.delete("1.0", "end")
+            if value.strip():
+                system_prompt_box.insert("1.0", value)
+        except Exception:
+            return
+        update_status(f"System preset set to {name}")
+
+    try:
+        preset_menu.configure(command=_apply_system_preset)
+    except Exception:
+        pass
 
     width_var = tk.StringVar(value=str(prefs["image_width"]))
     height_var = tk.StringVar(value=str(prefs["image_height"]))
@@ -733,6 +849,730 @@ def render_settings_tab(tab) -> None:
         text_color=MUTED,
     ).pack(anchor="w", pady=(4, 0))
 
+    storage_body = _make_settings_card(
+        scroll,
+        "Storage",
+        "ACRE stores settings, chat history, and outputs in your OS app data folder. "
+        "Models can live anywhere (including external drives).",
+        title_font=font_h2,
+        blurb_font=font_ui,
+    )
+
+    def _path_box(parent, value: str) -> None:
+        box = ctk.CTkTextbox(
+            parent,
+            corner_radius=RADIUS_SM,
+            fg_color=SURFACE_PRIMARY,
+            text_color=TEXT,
+            font=font_ui,
+            wrap="word",
+            height=56,
+        )
+        box.pack(fill="x", pady=(0, 10))
+        box.insert("1.0", value)
+        box.configure(state="disabled")
+
+    ctk.CTkLabel(storage_body, text="Data folder", font=font_ui, text_color=TEXT).pack(anchor="w", pady=(0, 4))
+    _path_box(storage_body, str(paths.data_root()))
+    ctk.CTkLabel(storage_body, text="Models folder", font=font_ui, text_color=TEXT).pack(anchor="w", pady=(0, 4))
+    _path_box(storage_body, str(paths.models_dir()))
+
+    def _save_models_dir_override(value: str | None) -> None:
+        settings_local = load_settings()
+        paths_section = settings_local.setdefault("paths", {})
+        if value and value.strip():
+            paths_section["models_dir"] = value.strip()
+        else:
+            paths_section.pop("models_dir", None)
+            if not paths_section:
+                settings_local.pop("paths", None)
+        save_settings(settings_local)
+
+    def _reinit_model_manager() -> None:
+        if not gs.current_user:
+            return
+        prefs_local = get_prefs()
+        history_dir = str(paths.user_history_dir(gs.current_user))
+        from model_manager import ModelManager
+
+        new_dir = paths.models_dir()
+        try:
+            new_mgr = ModelManager(
+                models_dir=str(new_dir),
+                history_dir=history_dir,
+                device_pref=prefs_local["device_preference"],
+            )
+        except Exception as exc:
+            messagebox.showerror("Models Folder Error", str(exc))
+            return
+
+        old_mgr = gs.mgr
+        gs.mgr = new_mgr
+        if gs.encryption_key:
+            try:
+                encryptor = ChatEncryptor(gs.encryption_key)
+                gs.mgr.set_encryptor(encryptor)
+            except Exception:
+                update_status("Encryption disabled: unable to initialize secure storage.")
+        gs.mgr.set_history_enabled(prefs_local["history_enabled"])
+        gs.mgr.set_text_config(
+            max_tokens=prefs_local["text_max_tokens"],
+            temperature=prefs_local["text_temperature"],
+        )
+        if hasattr(gs.mgr, "set_system_prompt"):
+            try:
+                gs.mgr.set_system_prompt(prefs_local.get("system_prompt", ""))
+            except Exception:
+                pass
+
+        try:
+            if old_mgr:
+                old_mgr.unload()
+        except Exception:
+            pass
+
+        refresh_list()
+        render_history()
+        refresh_attach_row()
+        update_status(f"Models folder set to:\n{new_dir}")
+
+    def open_data_folder() -> None:
+        open_path(paths.data_root())
+
+    def open_models_folder() -> None:
+        open_path(paths.models_dir())
+
+    def change_models_folder() -> None:
+        from tkinter import filedialog
+
+        selection = filedialog.askdirectory(title="Choose Models Folder")
+        if not selection:
+            return
+        _save_models_dir_override(selection)
+        _reinit_model_manager()
+        render_settings_tab(tab)
+
+    def reset_models_folder() -> None:
+        _save_models_dir_override(None)
+        _reinit_model_manager()
+        render_settings_tab(tab)
+
+    storage_row = ctk.CTkFrame(storage_body, fg_color="transparent")
+    storage_row.pack(fill="x", pady=(0, 4))
+    ctk.CTkButton(
+        storage_row,
+        text="Open data folder",
+        command=open_data_folder,
+        font=font_bold,
+        corner_radius=BUTTON_RADIUS,
+        fg_color=ACCENT,
+        hover_color=ACCENT_HOVER,
+        text_color="white",
+    ).pack(side="left", padx=(0, 8))
+    ctk.CTkButton(
+        storage_row,
+        text="Open models folder",
+        command=open_models_folder,
+        font=font_bold,
+        corner_radius=BUTTON_RADIUS,
+        fg_color=ACCENT,
+        hover_color=ACCENT_HOVER,
+        text_color="white",
+    ).pack(side="left", padx=(0, 8))
+    ctk.CTkButton(
+        storage_row,
+        text="Change models folder…",
+        command=change_models_folder,
+        font=font_bold,
+        corner_radius=BUTTON_RADIUS,
+        fg_color=TITLE_BAR_ACCENT,
+        hover_color=ACCENT_HOVER,
+        text_color="white",
+    ).pack(side="left", padx=(0, 8))
+    ctk.CTkButton(
+        storage_row,
+        text="Use default",
+        command=reset_models_folder,
+        font=font_bold,
+        corner_radius=BUTTON_RADIUS,
+        fg_color=TITLE_BAR_ACCENT,
+        hover_color=ACCENT_HOVER,
+        text_color="white",
+    ).pack(side="left")
+
+    settings_blob = load_settings()
+    server_settings = settings_blob.get("server", {}) if isinstance(settings_blob.get("server"), dict) else {}
+    server_port_var = tk.StringVar(value=str(server_settings.get("port", 4891)))
+    server_token_var = tk.StringVar(value=str(server_settings.get("token", "")))
+    server_start_var = tk.BooleanVar(value=bool(server_settings.get("start_on_launch", False)))
+
+    def _save_server_settings() -> tuple[int, Optional[str]] | None:
+        port = to_int(server_port_var.get(), 4891)
+        if port < 1 or port > 65535:
+            messagebox.showerror("Local API Server", "Port must be between 1 and 65535.")
+            return None
+        token = str(server_token_var.get() or "").strip() or None
+        settings_local = load_settings()
+        section = settings_local.setdefault("server", {})
+        section["port"] = int(port)
+        section["start_on_launch"] = bool(server_start_var.get())
+        if token:
+            section["token"] = token
+        else:
+            section.pop("token", None)
+        save_settings(settings_local)
+        return int(port), token
+
+    server_body = _make_settings_card(
+        scroll,
+        "Local API Server",
+        "Expose an OpenAI-compatible API on localhost for interop with other apps. "
+        "It uses the currently loaded model and never sends data off this machine.",
+        title_font=font_h2,
+        blurb_font=font_ui,
+    )
+
+    running_server = getattr(gs, "api_server", None)
+    running_url = None
+    if running_server is not None:
+        try:
+            host, port = running_server.server_address
+            running_url = f"http://{host}:{port}/v1"
+        except Exception:
+            running_url = "running"
+
+    ctk.CTkLabel(
+        server_body,
+        text=f"Status: {'Running' if running_server else 'Stopped'}"
+        + (f" ({running_url})" if running_url else ""),
+        font=font_ui,
+        text_color=TEXT if running_server else MUTED,
+        wraplength=560,
+        justify="left",
+    ).pack(anchor="w", pady=(0, 8))
+
+    port_row = ctk.CTkFrame(server_body, fg_color="transparent")
+    port_row.pack(fill="x", pady=(0, 10))
+    ctk.CTkLabel(port_row, text="Port", font=FONT_UI, text_color=TEXT).grid(
+        row=0, column=0, padx=(0, 8), sticky="w"
+    )
+    ctk.CTkEntry(port_row, textvariable=server_port_var).grid(row=0, column=1, sticky="we")
+    port_row.grid_columnconfigure(1, weight=1)
+
+    token_row = ctk.CTkFrame(server_body, fg_color="transparent")
+    token_row.pack(fill="x", pady=(0, 10))
+    ctk.CTkLabel(token_row, text="Auth token (optional)", font=FONT_UI, text_color=TEXT).grid(
+        row=0, column=0, padx=(0, 8), sticky="w"
+    )
+    ctk.CTkEntry(token_row, textvariable=server_token_var, show="•").grid(
+        row=0, column=1, sticky="we"
+    )
+    token_row.grid_columnconfigure(1, weight=1)
+
+    token_tip = "No auth: localhost only." if not server_token_var.get().strip() else "Clients must send: Authorization: Bearer <token>"
+    ctk.CTkLabel(
+        server_body,
+        text=token_tip,
+        font=font_ui,
+        text_color=MUTED,
+        wraplength=560,
+        justify="left",
+    ).pack(anchor="w", pady=(0, 10))
+
+    ctk.CTkCheckBox(
+        server_body,
+        text="Start server on launch",
+        variable=server_start_var,
+        font=FONT_UI,
+        text_color=TEXT,
+        fg_color=ACCENT,
+        border_color=ACCENT,
+        hover_color=ACCENT_HOVER,
+        checkmark_color=TEXT,
+        command=lambda: _save_server_settings(),
+    ).pack(anchor="w", pady=(0, 10))
+
+    def _generate_token() -> None:
+        import secrets
+
+        server_token_var.set(secrets.token_urlsafe(24))
+        _save_server_settings()
+        render_settings_tab(tab)
+
+    def _copy_token() -> None:
+        token = str(server_token_var.get() or "").strip()
+        if not token:
+            update_status("No token set.")
+            return
+        try:
+            if gs.root:
+                gs.root.clipboard_clear()
+                gs.root.clipboard_append(token)
+            update_status("Token copied to clipboard.")
+        except Exception:
+            update_status("Failed to copy token.")
+
+    def _start_server() -> None:
+        if getattr(gs, "api_server", None) is not None:
+            update_status("Local API server already running.")
+            return
+        saved = _save_server_settings()
+        if not saved:
+            return
+        port, token = saved
+        try:
+            server, thread, used_port = _start_openai_server_with_fallback(port, token)
+        except Exception as exc:
+            messagebox.showerror("Local API Server", str(exc))
+            return
+        gs.api_server = server
+        gs.api_server_thread = thread
+        if used_port != port:
+            server_port_var.set(str(used_port))
+            _save_server_settings()
+        update_status(f"Local API server running at http://127.0.0.1:{used_port}/v1")
+        render_settings_tab(tab)
+
+    def _stop_server() -> None:
+        from .openai_server import stop_openai_server
+
+        stop_openai_server(getattr(gs, "api_server", None))
+        gs.api_server = None
+        gs.api_server_thread = None
+        update_status("Local API server stopped.")
+        render_settings_tab(tab)
+
+    server_buttons = ctk.CTkFrame(server_body, fg_color="transparent")
+    server_buttons.pack(fill="x", pady=(0, 4))
+    if running_server:
+        ctk.CTkButton(
+            server_buttons,
+            text="Stop server",
+            command=_stop_server,
+            font=font_bold,
+            corner_radius=BUTTON_RADIUS,
+            fg_color=CRITICAL,
+            hover_color=CRITICAL_HOVER,
+            text_color="white",
+        ).pack(side="left", padx=(0, 8))
+    else:
+        ctk.CTkButton(
+            server_buttons,
+            text="Start server",
+            command=_start_server,
+            font=font_bold,
+            corner_radius=BUTTON_RADIUS,
+            fg_color=ACCENT,
+            hover_color=ACCENT_HOVER,
+            text_color="white",
+        ).pack(side="left", padx=(0, 8))
+    ctk.CTkButton(
+        server_buttons,
+        text="Generate token",
+        command=_generate_token,
+        font=font_bold,
+        corner_radius=BUTTON_RADIUS,
+        fg_color=TITLE_BAR_ACCENT,
+        hover_color=ACCENT_HOVER,
+        text_color="white",
+    ).pack(side="left")
+    ctk.CTkButton(
+        server_buttons,
+        text="Copy token",
+        command=_copy_token,
+        font=font_bold,
+        corner_radius=BUTTON_RADIUS,
+        fg_color=TITLE_BAR_ACCENT,
+        hover_color=ACCENT_HOVER,
+        text_color="white",
+    ).pack(side="left", padx=(8, 0))
+
+    def _computed_base_url() -> str:
+        server = getattr(gs, "api_server", None)
+        if server is not None:
+            try:
+                host, port = server.server_address
+                return f"http://{host}:{port}/v1"
+            except Exception:
+                pass
+        port = to_int(server_port_var.get(), 4891)
+        return f"http://127.0.0.1:{port}/v1"
+
+    def _copy_base_url() -> None:
+        url = _computed_base_url()
+        try:
+            if gs.root:
+                gs.root.clipboard_clear()
+                gs.root.clipboard_append(url)
+            update_status("Base URL copied to clipboard.")
+        except Exception:
+            update_status("Failed to copy base URL.")
+
+    base_url_box = ctk.CTkTextbox(
+        server_body,
+        corner_radius=RADIUS_SM,
+        fg_color=SURFACE_PRIMARY,
+        text_color=TEXT,
+        font=font_ui,
+        wrap="word",
+        height=44,
+    )
+    base_url_box.pack(fill="x", pady=(10, 6))
+    base_url_box.insert("1.0", f"Base URL:\n{_computed_base_url()}")
+    base_url_box.configure(state="disabled")
+
+    ctk.CTkButton(
+        server_body,
+        text="Copy base URL",
+        command=_copy_base_url,
+        font=font_bold,
+        corner_radius=BUTTON_RADIUS,
+        fg_color=TITLE_BAR_ACCENT,
+        hover_color=ACCENT_HOVER,
+        text_color="white",
+    ).pack(anchor="w", pady=(0, 10), padx=2)
+
+    api_prompt_var = tk.StringVar(value="Say hello from the ACRE local API server.")
+    api_stream_var = tk.BooleanVar(value=True)
+
+    test_row = ctk.CTkFrame(server_body, fg_color="transparent")
+    test_row.pack(fill="x", pady=(0, 8))
+    ctk.CTkLabel(test_row, text="Quick test prompt", font=FONT_UI, text_color=TEXT).grid(
+        row=0, column=0, padx=(0, 8), sticky="w"
+    )
+    ctk.CTkEntry(test_row, textvariable=api_prompt_var).grid(row=0, column=1, sticky="we")
+    test_row.grid_columnconfigure(1, weight=1)
+
+    ctk.CTkCheckBox(
+        server_body,
+        text="Stream response (SSE)",
+        variable=api_stream_var,
+        font=FONT_UI,
+        text_color=TEXT,
+        fg_color=ACCENT,
+        border_color=ACCENT,
+        hover_color=ACCENT_HOVER,
+        checkmark_color=TEXT,
+    ).pack(anchor="w", pady=(0, 10))
+
+    api_output = ctk.CTkTextbox(
+        server_body,
+        corner_radius=RADIUS_SM,
+        fg_color=SURFACE_PRIMARY,
+        text_color=TEXT,
+        font=font_ui,
+        wrap="word",
+        height=160,
+    )
+    api_output.pack(fill="x", pady=(0, 8))
+    api_output.configure(state="disabled")
+
+    test_state: dict[str, object] = {"running": False, "cancel": None, "conn": None}
+
+    def _api_clear() -> None:
+        try:
+            api_output.configure(state="normal")
+            api_output.delete("1.0", "end")
+            api_output.configure(state="disabled")
+        except Exception:
+            pass
+
+    def _api_append(text: str) -> None:
+        if not text:
+            return
+        try:
+            if not api_output.winfo_exists():
+                return
+        except Exception:
+            return
+        try:
+            api_output.configure(state="normal")
+            api_output.insert("end", text)
+            api_output.see("end")
+            api_output.configure(state="disabled")
+        except Exception:
+            pass
+
+    def _server_info() -> tuple[str, int, Optional[str]] | None:
+        server = getattr(gs, "api_server", None)
+        if server is None:
+            return None
+        try:
+            host, port = server.server_address
+        except Exception:
+            host, port = "127.0.0.1", to_int(server_port_var.get(), 4891)
+        token = getattr(server, "auth_token", None) or None
+        return str(host), int(port), str(token) if token else None
+
+    def _set_test_controls(running: bool) -> None:
+        test_state["running"] = running
+        try:
+            models_btn.configure(state="disabled" if running else "normal")
+        except Exception:
+            pass
+        try:
+            chat_btn.configure(state="disabled" if running else "normal")
+        except Exception:
+            pass
+        try:
+            clear_btn.configure(state="disabled" if running else "normal")
+        except Exception:
+            pass
+        try:
+            if running:
+                if not stop_btn.winfo_manager():
+                    stop_btn.pack(side="left", padx=(8, 0))
+                stop_btn.configure(state="normal")
+            else:
+                stop_btn.configure(state="disabled")
+                stop_btn.pack_forget()
+        except Exception:
+            pass
+
+    def _test_models() -> None:
+        info = _server_info()
+        if not info:
+            update_status("Start the local API server first.")
+            return
+        host, port, token = info
+        _api_clear()
+        _api_append(f"GET http://{host}:{port}/v1/models\n\n")
+
+        def worker() -> None:
+            conn = None
+            try:
+                conn = http.client.HTTPConnection(host, port, timeout=5)
+                headers = {"Accept": "application/json"}
+                if token:
+                    headers["Authorization"] = f"Bearer {token}"
+                conn.request("GET", "/v1/models", headers=headers)
+                resp = conn.getresponse()
+                body = resp.read()
+                status = int(getattr(resp, "status", 0))
+                reason = str(getattr(resp, "reason", ""))
+                text = body.decode("utf-8", errors="replace")
+                try:
+                    parsed = json.loads(text)
+                    text = json.dumps(parsed, ensure_ascii=False, indent=2)
+                except Exception:
+                    pass
+
+                def done() -> None:
+                    _api_append(f"HTTP {status} {reason}\n{text}\n")
+
+                if gs.root:
+                    gs.root.after(0, done)
+            except Exception as exc:
+                if gs.root:
+                    gs.root.after(0, lambda: _api_append(f"[Error] {exc}\n"))
+            finally:
+                try:
+                    if conn:
+                        conn.close()
+                except Exception:
+                    pass
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _stop_test() -> None:
+        cancel = test_state.get("cancel")
+        if hasattr(cancel, "set"):
+            try:
+                cancel.set()
+            except Exception:
+                pass
+        conn = test_state.get("conn")
+        if conn is not None and hasattr(conn, "close"):
+            try:
+                conn.close()
+            except Exception:
+                pass
+        update_status("Stopping API test…")
+
+    def _test_chat() -> None:
+        info = _server_info()
+        if not info:
+            update_status("Start the local API server first.")
+            return
+        host, port, token = info
+        prompt = str(api_prompt_var.get() or "").strip()
+        if not prompt:
+            update_status("Enter a test prompt.")
+            return
+
+        stream = bool(api_stream_var.get())
+        _api_clear()
+        _api_append(f"POST http://{host}:{port}/v1/chat/completions (stream={stream})\n\n")
+
+        if stream:
+            cancel = threading.Event()
+            test_state["cancel"] = cancel
+            _set_test_controls(True)
+
+        def worker() -> None:
+            conn = None
+            try:
+                payload = {
+                    "messages": [{"role": "user", "content": prompt}],
+                    "stream": stream,
+                }
+                body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+                headers = {
+                    "Content-Type": "application/json",
+                    "Accept": "application/json",
+                }
+                if token:
+                    headers["Authorization"] = f"Bearer {token}"
+
+                conn = http.client.HTTPConnection(host, port, timeout=2 if stream else 30)
+                if stream:
+                    test_state["conn"] = conn
+                conn.request("POST", "/v1/chat/completions", body=body, headers=headers)
+                resp = conn.getresponse()
+                status = int(getattr(resp, "status", 0))
+                reason = str(getattr(resp, "reason", ""))
+
+                if not stream:
+                    raw = resp.read().decode("utf-8", errors="replace")
+                    try:
+                        parsed = json.loads(raw)
+                        content = (
+                            parsed.get("choices", [{}])[0]
+                            .get("message", {})
+                            .get("content", "")
+                        )
+                        pretty = json.dumps(parsed, ensure_ascii=False, indent=2)
+                        raw = f"{pretty}\n\nAssistant:\n{content}\n"
+                    except Exception:
+                        pass
+
+                    def done_nonstream() -> None:
+                        _api_append(f"HTTP {status} {reason}\n{raw}\n")
+
+                    if gs.root:
+                        gs.root.after(0, done_nonstream)
+                    return
+
+                if gs.root:
+                    gs.root.after(0, lambda: _api_append(f"HTTP {status} {reason}\n\nAssistant: "))
+                if status != 200:
+                    raw = resp.read().decode("utf-8", errors="replace")
+                    if gs.root:
+                        gs.root.after(0, lambda: _api_append(f"\n\n{raw}\n"))
+                    return
+
+                fp = getattr(resp, "fp", None)
+                if fp is None:
+                    if gs.root:
+                        gs.root.after(0, lambda: _api_append("\n\n[Error] Streaming response unavailable.\n"))
+                    return
+
+                while True:
+                    if cancel.is_set():
+                        break
+                    try:
+                        line = fp.readline()
+                    except socket.timeout:
+                        continue
+                    except Exception:
+                        break
+                    if not line:
+                        break
+                    text = line.decode("utf-8", errors="replace").strip()
+                    if not text or not text.startswith("data:"):
+                        continue
+                    data_line = text[5:].strip()
+                    if data_line == "[DONE]":
+                        break
+                    try:
+                        obj = json.loads(data_line)
+                    except Exception:
+                        if gs.root:
+                            gs.root.after(0, lambda s=data_line: _api_append(s))
+                        continue
+                    if isinstance(obj, dict) and "error" in obj:
+                        err = obj.get("error") or {}
+                        msg = err.get("message") if isinstance(err, dict) else str(err)
+                        if gs.root:
+                            gs.root.after(0, lambda m=msg: _api_append(f"\n\n[Error] {m}\n"))
+                        break
+                    try:
+                        delta = obj.get("choices", [{}])[0].get("delta", {})
+                        piece = delta.get("content", "")
+                    except Exception:
+                        piece = ""
+                    if piece and gs.root:
+                        gs.root.after(0, lambda p=str(piece): _api_append(p))
+            except Exception as exc:
+                if gs.root:
+                    gs.root.after(0, lambda: _api_append(f"[Error] {exc}\n"))
+            finally:
+                try:
+                    if conn:
+                        conn.close()
+                except Exception:
+                    pass
+                if stream and gs.root:
+                    gs.root.after(0, lambda: (_api_append("\n"), _set_test_controls(False)))
+                test_state["cancel"] = None
+                test_state["conn"] = None
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    test_buttons = ctk.CTkFrame(server_body, fg_color="transparent")
+    test_buttons.pack(fill="x", pady=(0, 6))
+    models_btn = ctk.CTkButton(
+        test_buttons,
+        text="Test /v1/models",
+        command=_test_models,
+        font=font_bold,
+        corner_radius=BUTTON_RADIUS,
+        fg_color=TITLE_BAR_ACCENT,
+        hover_color=ACCENT_HOVER,
+        text_color="white",
+    )
+    models_btn.pack(side="left")
+    chat_btn = ctk.CTkButton(
+        test_buttons,
+        text="Test chat",
+        command=_test_chat,
+        font=font_bold,
+        corner_radius=BUTTON_RADIUS,
+        fg_color=TITLE_BAR_ACCENT,
+        hover_color=ACCENT_HOVER,
+        text_color="white",
+    )
+    chat_btn.pack(side="left", padx=(8, 0))
+    clear_btn = ctk.CTkButton(
+        test_buttons,
+        text="Clear output",
+        command=_api_clear,
+        font=font_bold,
+        corner_radius=BUTTON_RADIUS,
+        fg_color=TITLE_BAR_ACCENT,
+        hover_color=ACCENT_HOVER,
+        text_color="white",
+    )
+    clear_btn.pack(side="left", padx=(8, 0))
+    stop_btn = ctk.CTkButton(
+        test_buttons,
+        text="Stop test",
+        command=_stop_test,
+        font=font_bold,
+        corner_radius=BUTTON_RADIUS,
+        fg_color=CRITICAL,
+        hover_color=CRITICAL_HOVER,
+        text_color="white",
+        state="disabled",
+    )
+
+    ctk.CTkLabel(
+        server_body,
+        text="Restart the server to apply port/token changes.",
+        font=font_ui,
+        text_color=MUTED,
+    ).pack(anchor="w", pady=(6, 0))
+
     tools_body = _make_settings_card(
         scroll,
         "Shortcuts",
@@ -772,7 +1612,7 @@ def render_settings_tab(tab) -> None:
     ctk.CTkButton(
         model_info_body,
         text="Open Models Folder",
-        command=lambda: open_path(Path('models')),
+        command=lambda: open_path(paths.models_dir()),
         corner_radius=BUTTON_RADIUS,
         fg_color=ACCENT,
         hover_color=ACCENT_HOVER,
@@ -795,7 +1635,7 @@ def render_settings_tab(tab) -> None:
     ctk.CTkButton(
         button_row,
         text="Open models",
-        command=lambda: open_path(Path("models")),
+        command=lambda: open_path(paths.models_dir()),
         font=font_bold,
         corner_radius=BUTTON_RADIUS,
         fg_color=ACCENT,
@@ -893,7 +1733,13 @@ def render_settings_tab(tab) -> None:
     ).pack(anchor="w", pady=(4, 0))
 
     def save_settings_values() -> None:
+        _save_server_settings()
+        try:
+            system_prompt_text = system_prompt_box.get("1.0", "end-1c").strip()
+        except Exception:
+            system_prompt_text = ""
         new_values = {
+            "system_prompt": system_prompt_text,
             "text_temperature": to_float(temp_var.get(), 0.7),
             "text_max_tokens": to_int(max_tokens_var.get(), 512),
             "image_width": to_int(width_var.get(), 512),
@@ -916,6 +1762,11 @@ def render_settings_tab(tab) -> None:
                 max_tokens=new_values["text_max_tokens"],
                 temperature=new_values["text_temperature"],
             )
+            if hasattr(gs.mgr, "set_system_prompt"):
+                try:
+                    gs.mgr.set_system_prompt(new_values.get("system_prompt", ""))
+                except Exception:
+                    pass
 
         ui_scale_value = float(new_values["ui_scale"])
         text_scale_value = float(new_values.get("text_scale", ui_scale_value))
@@ -979,7 +1830,7 @@ def open_settings() -> None:
 def build_main_ui() -> None:
     _refresh_theme_vars()
     settings = load_settings()
-    history_dir = str(Path("history") / gs.current_user) if gs.current_user else "history"
+    history_dir = str(paths.user_history_dir(gs.current_user))
     prefs = get_prefs()
     
     chat_scale = prefs.get(
@@ -994,7 +1845,7 @@ def build_main_ui() -> None:
 
     if gs.mgr is None:
         gs.mgr = ModelManager(
-            models_dir=str(Path("models")),
+            models_dir=str(paths.models_dir()),
             history_dir=history_dir,
             device_pref=prefs["device_preference"],
         )
@@ -1008,6 +1859,11 @@ def build_main_ui() -> None:
     gs.mgr.set_text_config(
         max_tokens=prefs["text_max_tokens"], temperature=prefs["text_temperature"]
     )
+    if hasattr(gs.mgr, "set_system_prompt"):
+        try:
+            gs.mgr.set_system_prompt(prefs.get("system_prompt", ""))
+        except Exception:
+            pass
     side_pack = dict(side="left", fill="y", padx=(10, 8), pady=12)
     gs.side_frame = ctk.CTkFrame(
         gs.workspace_frame,
@@ -1061,7 +1917,7 @@ def build_main_ui() -> None:
         if not selection:
             return
         real_name = gs.alias_to_real.get(selection, selection)
-        path = Path("models") / real_name
+        path = paths.models_dir() / real_name
         if not path.exists():
             return
         open_path(path)
@@ -1190,6 +2046,139 @@ def build_main_ui() -> None:
         border_width=0,
     )
     chat_border.pack(fill="both", expand=True, padx=12, pady=(12, 8))
+
+    chat_actions = ctk.CTkFrame(chat_border, fg_color="transparent")
+    chat_actions.pack(fill="x", padx=6, pady=(0, 8))
+
+    action_button = dict(
+        corner_radius=BUTTON_RADIUS,
+        fg_color=TITLE_BAR_ACCENT,
+        hover_color=ACCENT_HOVER,
+        text_color="white",
+        font=FONT_BOLD,
+        height=34,
+    )
+
+    def _copy_chat() -> None:
+        text = ""
+        try:
+            if gs.chat_history is not None:
+                try:
+                    text = gs.chat_history.get("sel.first", "sel.last")
+                except Exception:
+                    text = ""
+        except Exception:
+            text = ""
+
+        if not text and gs.mgr and gs.mgr.is_loaded():
+            try:
+                for msg in reversed(gs.mgr.get_history()):
+                    if msg.get("role") == "assistant":
+                        text = str(msg.get("content", "") or "").strip()
+                        break
+            except Exception:
+                text = ""
+
+        if not text and gs.chat_history is not None:
+            try:
+                text = gs.chat_history.get("1.0", "end-1c").strip()
+            except Exception:
+                text = ""
+
+        if not text:
+            update_status("Nothing to copy yet.")
+            return
+        try:
+            gs.root.clipboard_clear()
+            gs.root.clipboard_append(text)
+            update_status("Copied to clipboard.")
+        except Exception:
+            update_status("Copy failed.")
+
+    def _export_chat() -> None:
+        if not gs.mgr or not gs.mgr.is_loaded():
+            update_status("Load a model first.")
+            return
+        try:
+            from tkinter import filedialog
+        except Exception:
+            update_status("File dialog unavailable.")
+            return
+        filename = filedialog.asksaveasfilename(
+            title="Export chat",
+            defaultextension=".md",
+            filetypes=[("Markdown", "*.md"), ("JSON", "*.json")],
+        )
+        if not filename:
+            return
+        path = Path(filename)
+        history = []
+        try:
+            history = gs.mgr.get_history()
+        except Exception:
+            history = []
+        try:
+            if path.suffix.lower() == ".json":
+                payload = json.dumps(history, ensure_ascii=False, indent=2)
+                path.write_text(payload, encoding="utf-8")
+            else:
+                lines: list[str] = []
+                lines.append(f"# ACRE Chat Export")
+                lines.append("")
+                model_name = getattr(gs.mgr, "current_model_name", None) or "unknown"
+                lines.append(f"- Model: {model_name}")
+                lines.append(f"- Exported: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+                lines.append("")
+                for msg in history:
+                    role = str(msg.get("role") or "user").lower()
+                    content = str(msg.get("content") or "").strip()
+                    content = re.sub(r"\[\[(image|doc):.+?\]\]", "", content).strip()
+                    header = "User" if role == "user" else ("System" if role == "system" else "Assistant")
+                    lines.append(f"## {header}")
+                    lines.append(content or "(empty)")
+                    lines.append("")
+                path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+            update_status(f"Exported: {path.name}")
+        except Exception as exc:
+            update_status(f"Export failed: {exc}")
+
+    def _regenerate_last() -> None:
+        if not gs.mgr or not gs.mgr.is_loaded():
+            update_status("Load a model first.")
+            return
+        try:
+            prompt_text = gs.mgr.pop_last_exchange()
+        except Exception as exc:
+            update_status(str(exc))
+            return
+        if not prompt_text or not str(prompt_text).strip():
+            update_status("Nothing to regenerate yet.")
+            return
+        prompt_text = str(prompt_text)
+        if "[[image:" in prompt_text or "[[doc:" in prompt_text:
+            update_status("Regenerate is not supported for attachment turns yet.")
+            return
+        render_history()
+        if gs.entry is None:
+            return
+        try:
+            gs.entry.delete("1.0", tk.END)
+            gs.entry.insert("1.0", prompt_text)
+            gs.entry.configure(fg=TEXT)
+        except Exception:
+            pass
+        run_prompt()
+
+    ctk.CTkButton(chat_actions, text="↻ Regenerate", command=_regenerate_last, **action_button).pack(
+        side="left", padx=(0, 8)
+    )
+    ctk.CTkButton(chat_actions, text="Copy", command=_copy_chat, **action_button).pack(
+        side="left", padx=(0, 8)
+    )
+    ctk.CTkButton(chat_actions, text="Export…", command=_export_chat, **action_button).pack(
+        side="left"
+    )
+
     message_panel = ctk.CTkFrame(
         chat_border,
         fg_color=GLASS_BG,
@@ -1254,6 +2243,37 @@ def build_main_ui() -> None:
         command=run_prompt,
     )
     send_button.pack(side="right", padx=(6, 8), pady=4)
+    gs.send_button = send_button
+
+    def stop_generation() -> None:
+        try:
+            cancel = getattr(gs, "active_cancel_event", None)
+            if cancel is not None and hasattr(cancel, "set"):
+                try:
+                    cancel.set()
+                except Exception:
+                    pass
+            if gs.mgr:
+                gs.mgr.cancel_generation()
+            update_status("Stopping...")
+        except Exception:
+            pass
+
+    stop_button = ctk.CTkButton(
+        entry_container,
+        text="Stop",
+        width=84,
+        height=42,
+        corner_radius=BUTTON_RADIUS,
+        fg_color=CRITICAL,
+        hover_color=CRITICAL_HOVER,
+        text_color="white",
+        font=FONT_BOLD,
+        command=stop_generation,
+    )
+    stop_button.pack(side="right", padx=(0, 6), pady=4)
+    stop_button.pack_forget()
+    gs.stop_button = stop_button
     entry_frame = ctk.CTkFrame(
         entry_container,
         fg_color=CONTROL_BG,
@@ -1303,6 +2323,23 @@ def build_main_ui() -> None:
 
     gs.entry.bind("<Return>", send_on_return)
     gs.entry.bind("<KP_Enter>", send_on_return)
+
+    def intercept_image_paste(event=None):
+        try:
+            from .attachments import try_attach_clipboard_image
+        except Exception:
+            return
+        try:
+            attached = bool(try_attach_clipboard_image(quiet=True))
+        except Exception:
+            attached = False
+        if attached:
+            update_status("Attached image from clipboard.")
+            return "break"
+        return
+
+    gs.entry.bind("<Control-v>", intercept_image_paste)
+    gs.entry.bind("<Command-v>", intercept_image_paste)
     gallery_top = ctk.CTkFrame(gallery_tab, fg_color="transparent")
     gallery_top.pack(fill="x", padx=12, pady=(12, 0))
     ctk.CTkLabel(gallery_top, text="Recent images", font=FONT_H2, text_color=TEXT).pack(
@@ -1386,6 +2423,30 @@ def build_main_ui() -> None:
     )
     gs.settings_btn.place(relx=1.0, x=-24, y=26, anchor="ne")
     gs.settings_btn.lift()
+
+    try:
+        settings_local = load_settings()
+        server_cfg = settings_local.get("server", {}) if isinstance(settings_local.get("server"), dict) else {}
+        should_start = bool(server_cfg.get("start_on_launch", False))
+        if should_start and getattr(gs, "api_server", None) is None:
+            port = int(server_cfg.get("port", 4891))
+            token = str(server_cfg.get("token") or "").strip() or None
+            try:
+                server, thread, used_port = _start_openai_server_with_fallback(port, token)
+                gs.api_server = server
+                gs.api_server_thread = thread
+                if used_port != port:
+                    server_cfg["port"] = int(used_port)
+                    settings_local["server"] = server_cfg
+                    save_settings(settings_local)
+            except Exception as exc:
+                update_status(f"API server autostart failed: {exc}")
+            try:
+                render_settings_tab(settings_tab)
+            except Exception:
+                pass
+    except Exception:
+        pass
     refresh_list()
     render_history()
     if gs.mgr and gs.mgr.is_loaded():
@@ -1718,9 +2779,7 @@ def build_gate_ui() -> None:
         gs.current_user = user
         gs.pending_user = None
         try:
-            Path("models").mkdir(parents=True, exist_ok=True)
-            Path("history").mkdir(parents=True, exist_ok=True)
-            Path("outputs").mkdir(parents=True, exist_ok=True)
+            paths.ensure_user_data_dirs()
             ensure_user_dirs()
         except PermissionError:
             messagebox.showerror(
@@ -1843,6 +2902,14 @@ def build_gate_ui() -> None:
 
 def on_close() -> None:
     try:
+        try:
+            from .openai_server import stop_openai_server
+
+            stop_openai_server(getattr(gs, "api_server", None))
+        except Exception:
+            pass
+        gs.api_server = None
+        gs.api_server_thread = None
         if gs.mgr:
             gs.mgr.unload()
     finally:

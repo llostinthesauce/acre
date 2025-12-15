@@ -4,7 +4,7 @@ import json
 import threading
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 import soundfile as sf
 from PIL import Image
 from platform_utils import is_jetson
@@ -87,6 +87,33 @@ class LlamaCppBackend(BaseBackend):
                     if stop_token in text:
                         text = text.split(stop_token, 1)[0]
             return text.strip()
+
+    def generate_stream(
+        self,
+        prompt_text: str,
+        cfg: GenerationConfig,
+        cancel_event: Optional[threading.Event] = None,
+    ) -> Iterator[str]:
+        with self._lock:
+            if self._llama is None:
+                raise RuntimeError("Model has been unloaded")
+            stream = self._llama(
+                prompt_text,
+                max_tokens=cfg.max_tokens,
+                temperature=cfg.temperature,
+                stop=list(cfg.stop) if cfg.stop else None,
+                echo=False,
+                stream=True,
+            )
+            for part in stream:
+                if cancel_event is not None and cancel_event.is_set():
+                    break
+                try:
+                    text = part["choices"][0]["text"]
+                except Exception:
+                    continue
+                if text:
+                    yield str(text)
 
     def unload(self) -> None:
         with self._lock:
@@ -413,6 +440,106 @@ class HFBackend(BaseBackend):
                 if stop_token in text:
                     text = text.split(stop_token, 1)[0]
         return text.strip()
+
+    def generate_stream(
+        self,
+        prompt_text: str,
+        cfg: GenerationConfig,
+        cancel_event: Optional[threading.Event] = None,
+    ) -> Iterator[str]:
+        import torch as torch_module
+
+        add_special = bool(getattr(self._tokenizer, "add_bos_token", False))
+        encoded = self._tokenizer(prompt_text, return_tensors="pt", add_special_tokens=add_special)
+        if (
+            not add_special
+            and getattr(self._tokenizer, "bos_token_id", None) is not None
+            and (encoded["input_ids"].shape[1] > 0)
+        ):
+            bos_id = self._tokenizer.bos_token_id
+            if bos_id is not None and encoded["input_ids"][0, 0].item() != bos_id:
+                bos_tensor = torch_module.tensor([[bos_id]], device=encoded["input_ids"].device)
+                encoded["input_ids"] = torch_module.cat([bos_tensor, encoded["input_ids"]], dim=1)
+                if "attention_mask" in encoded:
+                    encoded["attention_mask"] = torch_module.cat(
+                        [
+                            torch_module.ones(
+                                (1, 1),
+                                device=encoded["attention_mask"].device,
+                                dtype=encoded["attention_mask"].dtype,
+                            ),
+                            encoded["attention_mask"],
+                        ],
+                        dim=1,
+                    )
+
+        if self._device != "cpu":
+            encoded = {k: v.to(self._device) for k, v in encoded.items()}
+
+        max_ctx = getattr(self._model.config, "max_position_embeddings", getattr(self._tokenizer, "model_max_length", 2048))
+        input_len = int(encoded["input_ids"].shape[1])
+        desired_new = int(cfg.max_tokens)
+        if input_len + desired_new > max_ctx:
+            keep = max(1, max_ctx - desired_new)
+            encoded["input_ids"] = encoded["input_ids"][:, -keep:]
+            if "attention_mask" in encoded:
+                encoded["attention_mask"] = encoded["attention_mask"][:, -keep:]
+            input_len = int(encoded["input_ids"].shape[1])
+
+        new_tokens = max(1, min(desired_new, max_ctx - input_len))
+        do_sample = cfg.temperature > 0.0
+        attention = encoded.get("attention_mask")
+        prompt_ids = encoded["input_ids"]
+        eos_token_id = getattr(self._tokenizer, "eos_token_id", None)
+        model_vocab = int(getattr(self._model.config, "vocab_size", 0) or 0)
+        if model_vocab:
+            prompt_ids = prompt_ids.clamp(min=0, max=model_vocab - 1)
+
+        temperature = float(cfg.temperature) if do_sample else 1.0
+        temperature = max(temperature, 0.0001)
+        total_ids = prompt_ids
+        attn_ids = attention
+
+        with torch_module.no_grad():
+            for _ in range(new_tokens):
+                if cancel_event is not None and cancel_event.is_set():
+                    break
+                if model_vocab:
+                    total_ids = total_ids.clamp(min=0, max=model_vocab - 1)
+                outputs = self._model(input_ids=total_ids, attention_mask=attn_ids, use_cache=False)
+                logits = outputs.logits[:, -1, :].float()
+                vocab_size = getattr(self._model.config, "vocab_size", logits.shape[-1])
+                if do_sample:
+                    probs = torch_module.softmax(logits / temperature, dim=-1)
+                    next_token = torch_module.multinomial(probs, num_samples=1)
+                else:
+                    next_token = torch_module.argmax(logits, dim=-1, keepdim=True)
+                token_value = int(next_token.item())
+                if token_value < 0 or token_value >= vocab_size:
+                    token_value = max(0, min(vocab_size - 1, token_value))
+                    next_token = torch_module.tensor(
+                        [[token_value]],
+                        device=total_ids.device,
+                        dtype=total_ids.dtype,
+                    )
+
+                total_ids = torch_module.cat([total_ids, next_token], dim=1)
+                if attn_ids is not None:
+                    ones = torch_module.ones((attn_ids.shape[0], 1), dtype=attn_ids.dtype, device=attn_ids.device)
+                    attn_ids = torch_module.cat([attn_ids, ones], dim=1)
+
+                if eos_token_id is not None and token_value == eos_token_id:
+                    break
+
+                piece = self._tokenizer.decode([token_value], skip_special_tokens=True)
+                if piece:
+                    yield piece
+
+                if total_ids.shape[1] > max_ctx:
+                    shift = total_ids.shape[1] - max_ctx
+                    total_ids = total_ids[:, -max_ctx:]
+                    if attn_ids is not None:
+                        attn_ids = attn_ids[:, -max_ctx:]
 
     def unload(self) -> None:
         try:

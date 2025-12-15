@@ -86,7 +86,25 @@ def _call_model(manager, prompt: str) -> str:
 def summarize_document(manager, path: Path) -> str:
     if manager is None or not manager.is_loaded() or manager.is_image_backend():
         raise RuntimeError("A text-capable model must be loaded before analyzing a document.")
-    text = extract_text(path)
+    try:
+        text = extract_text(path)
+    except DocumentReadError as exc:
+        message = str(exc).lower()
+        if path.suffix.lower() == ".pdf" and ("no extractable text" in message or "scanned" in message):
+            try:
+                from .doc_qa import load_document_chunks
+                from . import paths as app_paths
+
+                chunks = load_document_chunks(
+                    path,
+                    models_dir=app_paths.models_dir(),
+                    device_pref=str(getattr(manager, "_device_pref", "auto")),
+                )
+                text = "\n\n".join(f"[{c.get('source','doc')}] {c.get('text','')}" for c in chunks)
+            except Exception:
+                raise
+        else:
+            raise
     chunks = list(_chunk_text(text))
     if not chunks:
         raise DocumentReadError("Document did not contain any text to analyze.")

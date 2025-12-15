@@ -106,6 +106,7 @@ def get_prefs() -> dict:
     if is_jetson():
         device_pref = "cpu"
     return {
+        "system_prompt": str(prefs.get("system_prompt", "")),
         "text_temperature": float(prefs.get("text_temperature", 0.7)),
         "text_max_tokens": int(prefs.get("text_max_tokens", 512)),
         "image_width": int(prefs.get("image_width", 512)),

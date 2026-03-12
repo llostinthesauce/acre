@@ -1,4 +1,5 @@
 import os
+import subprocess
 import sys
 import tkinter as tk
 from pathlib import Path
@@ -139,22 +140,22 @@ def refresh_gallery(container) -> None:
         def open_image(p: Path = path) -> None:
             resolved = p.resolve()
             if sys.platform == "darwin":
-                os.system(f'open "{resolved}"')
+                subprocess.run(['open', str(resolved)], check=False)
                 return
             if os.name == "nt":
                 os.startfile(str(resolved))
                 return
-            os.system(f'xdg-open "{resolved}"')
+            subprocess.run(['xdg-open', str(resolved)], check=False)
 
         def reveal_image(p: Path = path) -> None:
             directory = p.resolve().parent
             if sys.platform == "darwin":
-                os.system(f'open "{directory}"')
+                subprocess.run(['open', str(directory)], check=False)
                 return
             if os.name == "nt":
                 os.startfile(str(directory))
                 return
-            os.system(f'xdg-open "{directory}"')
+            subprocess.run(['xdg-open', str(directory)], check=False)
 
         def delete_image(p: Path = path) -> None:
             try:

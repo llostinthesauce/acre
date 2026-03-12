@@ -1,6 +1,17 @@
-# ACRE is a switchboard for running and comparing LLM workflows. It lets you swap models on the fly (including imports), toggle pipelines, and run standard chat/inference, document analysis, and image generation. You can adjust tokens/temperature, pick themes, and enable safety checks like query parsing. Model training hooks are available when you want to fine-tune. Note: Jetson devices use a different startup script and live on their own Jetson branch.
+# ACRE — LLM Switchboard
 
-# ACRE LLM Switchboard
+> **Status: Active Project** — ACRE serves a different purpose than [Cortex](https://github.com/llostinthesauce/cortex)
+
+| Project | Purpose |
+|---------|---------|
+| **ACRE** | Compare and benchmark LLM workflows — swap models, toggle pipelines, run A/B tests |
+| **Cortex** | Personal AI platform — RAG, agents, native inference, long-term memory |
+
+ACRE is a switchboard for running and comparing LLM workflows. It lets you swap models on the fly (including imports), toggle pipelines, and run standard chat/inference, document analysis, and image generation. You can adjust tokens/temperature, pick themes, and enable safety checks like query parsing. Model training hooks are available when you want to fine-tune. 
+
+> **Note:** Jetson devices use a different startup script and live on their own Jetson branch.
+
+---
 
 ## How to Use
 

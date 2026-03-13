@@ -65,3 +65,4 @@ ACRE is a switchboard for running and comparing LLM workflows. It lets you swap 
 
 9. **Add/load models.**  
    For easy access, place downloaded model files in the `models/` folder located within the application directory.
+

@@ -32,6 +32,9 @@ config/settings.json
 models/
 history/*.json
 
+# Benchmark/test notes (may contain local paths)
+notes/tests/
+
 # Other generated or temp files
 *.log
 *.tmp
